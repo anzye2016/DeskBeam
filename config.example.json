@@ -1,0 +1,13 @@
+{
+    "port": 8769,
+    "ssl_cert": "cert.pem",
+    "ssl_key": "key.pem",
+    "web_dir": "web",
+    "token": "",
+    "max_fps": 3,
+    "streaming": true,
+    "gop": 1,
+    "wsl_asr_script": "~/scripts/asr.py",
+    "asr_health_url": "http://127.0.0.1:8082/healthz",
+    "asr_cooldown": 10
+}

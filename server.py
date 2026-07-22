@@ -565,21 +565,31 @@ async def main():
 
 
 if __name__ == "__main__":
+    # Diagnostic: write startup marker immediately
+    try:
+        (SCRIPT_DIR / "server.pid").write_text(str(os.getpid()))
+    except Exception:
+        pass
+
     # Kill old instances before starting
-    import subprocess as _sp
-    _my_pid = os.getpid()
-    _sp.run(
-        ["powershell", "-NoProfile", "-Command",
-         f"Get-Process DeskBeamRemote -ErrorAction SilentlyContinue | Where-Object {{ $_.Id -ne {_my_pid} }} | Stop-Process -Force"],
-        capture_output=True, creationflags=0x08000000,
-    )
-    _script_dir = str(SCRIPT_DIR).replace("\\", "\\\\")
-    _sp.run(
-        ["powershell", "-NoProfile", "-Command",
-         f"Get-WmiObject Win32_Process -Filter \"name='pythonw.exe' and commandline like '%{_script_dir}%'\" | "
-         f"ForEach-Object {{ if ($_.ProcessId -ne {_my_pid}) {{ $_.Terminate() | Out-Null }} }}"],
-        capture_output=True, creationflags=0x08000000,
-    )
+    try:
+        import subprocess as _sp
+        _my_pid = os.getpid()
+        _sp.run(
+            ["powershell", "-NoProfile", "-Command",
+             f"Get-Process DeskBeamRemote -ErrorAction SilentlyContinue | Where-Object {{ $_.Id -ne {_my_pid} }} | Stop-Process -Force"],
+            capture_output=True, creationflags=0x08000000, timeout=10,
+        )
+        _script_dir = str(SCRIPT_DIR).replace("\\", "\\\\")
+        _sp.run(
+            ["powershell", "-NoProfile", "-Command",
+             f"Get-CimInstance Win32_Process -Filter \"name='pythonw.exe'\" | "
+             f"Where-Object {{ $_.CommandLine -like '*{_script_dir}*' -and $_.ProcessId -ne {_my_pid} }} | "
+             f"ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"],
+            capture_output=True, creationflags=0x08000000, timeout=10,
+        )
+    except Exception:
+        pass
 
     try:
         PID_FILE.write_text(str(os.getpid()))

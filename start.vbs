@@ -7,8 +7,19 @@ scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
 
 ' Kill old pythonw.exe running DeskBeam server.py in this directory
 Dim pattern : pattern = Replace(scriptDir, "\", "\\")
-shell.Run "powershell -NoProfile -Command ""Get-WmiObject Win32_Process -Filter """"name='pythonw.exe' and commandline like '%" & pattern & "%'"""" | ForEach-Object { $_.Terminate() | Out-Null }""", 0, True
+shell.Run "powershell -NoProfile -Command ""Get-WmiObject Win32_Process -Filter """"name='pythonw.exe' and commandline like '%" & pattern & "%'"""" | ForEach-Object { $_.Terminate() | Out-Null }""", 0, False
 
 Dim pythonw : pythonw = scriptDir & "\.venv\Scripts\pythonw.exe"
+Dim serverpy : serverpy = scriptDir & "\server.py"
+
+If Not fso.FileExists(pythonw) Then
+    MsgBox "pythonw.exe not found:" & vbCrLf & pythonw, 16, "DeskBeam Error"
+    WScript.Quit 1
+End If
+If Not fso.FileExists(serverpy) Then
+    MsgBox "server.py not found:" & vbCrLf & serverpy, 16, "DeskBeam Error"
+    WScript.Quit 1
+End If
+
 Dim app : Set app = CreateObject("Shell.Application")
-app.ShellExecute pythonw, Chr(34) & scriptDir & "\server.py" & Chr(34), scriptDir, "runas", 0
+app.ShellExecute pythonw, Chr(34) & serverpy & Chr(34), scriptDir, "runas", 0

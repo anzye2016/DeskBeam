@@ -215,6 +215,10 @@ On LAN, an attacker can redirect traffic + present a fake cert → full MITM (de
     └── login.html         # Auth page / 登录页
 ```
 
-## 11. License / 许可证
+## 11. Disclaimer / 免责声明
+
+DeskBeam provides remote desktop access. Misconfiguration (weak token, untrusted network, leaked secrets) may lead to unauthorized access, data loss, or other damages. The authors assume no liability for any loss or damage arising from the use of this software. Use at your own risk. | 本软件提供远程桌面功能。配置不当（弱口令、不受信任的网络、密钥泄露）可能导致未授权访问、数据泄露或其他损失。作者不承担任何责任，请自行评估风险。
+
+## 12. License / 许可证
 
 MIT — see [LICENSE](LICENSE)

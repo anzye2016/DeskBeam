@@ -8,6 +8,11 @@ Two deployment modes | 两种部署模式：
 
 Hardware H.264 encoding via NVENC/QSV/AMF. Touchpad, mouse, keyboard, text input, voice-to-text. Deploy as Python source or compile to a single portable exe. | 硬件 H.264 编码（NVENC/QSV/AMF），触控板/鼠标/键盘/文字输入/语音转文字。支持 Python 源码运行或编译为单文件 exe。
 
+<p align="center">
+  <img src="docs-screen.jpg" width="45%" alt="SCREEN mode">
+  <img src="docs-remote.jpg" width="45%" alt="REMOTE mode">
+</p>
+
 ---
 
 ## 1. Requirements / 环境要求

@@ -6,14 +6,17 @@ fltmc >nul 2>&1 || (
     exit /b
 )
 
+rem Kill by PID file (most recent instance)
 if exist server.pid (
     set /p PID=<server.pid
     taskkill /PID %PID% /F >nul 2>&1
     del server.pid >nul 2>&1
 )
 
-taskkill /IM DeskBeamRemote.exe /F >nul 2>&1
+rem Kill any process holding our port (catches orphaned/old instances)
+powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; Get-NetTCPConnection -LocalPort 8769 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }"
 
-powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; $dir='%~dp0'; $dir=$dir.TrimEnd('\'); $escaped=$dir -replace '\\','\\'; Get-CimInstance Win32_Process -Filter \"name='pythonw.exe'\" | Where-Object { $_.CommandLine -like '*'+$escaped+'*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+rem Kill compiled exe
+taskkill /IM DeskBeamRemote.exe /F >nul 2>&1
 
 echo Done.

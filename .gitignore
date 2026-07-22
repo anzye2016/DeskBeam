@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 *.pyc
+*.exe
 **/recording.wav
 **/stderr.txt
 **/server.pid
@@ -8,3 +9,8 @@ __pycache__/
 **/cert.pem
 **/key.pem
 **/config.json
+dist/
+build/
+.build_venv/
+*.spec
+temp/

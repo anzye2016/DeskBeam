@@ -565,9 +565,8 @@ async def main():
 
 
 if __name__ == "__main__":
-    # Diagnostic: write startup marker immediately
     try:
-        (SCRIPT_DIR / "server.pid").write_text(str(os.getpid()))
+        PID_FILE.write_text(str(os.getpid()))
     except Exception:
         pass
 
@@ -588,11 +587,6 @@ if __name__ == "__main__":
              f"ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"],
             capture_output=True, creationflags=0x08000000, timeout=10,
         )
-    except Exception:
-        pass
-
-    try:
-        PID_FILE.write_text(str(os.getpid()))
     except Exception:
         pass
 

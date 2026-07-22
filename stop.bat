@@ -14,6 +14,6 @@ if exist server.pid (
 
 taskkill /IM DeskBeamRemote.exe /F >nul 2>&1
 
-powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; $dir='%~dp0'; $dir=$dir -replace '\\','\\'; Get-WmiObject Win32_Process -Filter \"name='pythonw.exe' and commandline like '%$dir%'\" | ForEach-Object { $_.Terminate() | Out-Null }"
+powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; $dir='%~dp0'; $dir=$dir.TrimEnd('\'); $escaped=$dir -replace '\\','\\'; Get-CimInstance Win32_Process -Filter \"name='pythonw.exe'\" | Where-Object { $_.CommandLine -like '*'+$escaped+'*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
 
 echo Done.

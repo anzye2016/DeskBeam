@@ -299,8 +299,11 @@ def _transcribe(wav_path):
             _asr_last_check = 0
         return ""
 
+    if err:
+        print(f"  WSL stderr: {err[:200]}")
+
     lines = []
-    for line in (out + "\n" + err).split("\n"):
+    for line in out.split("\n"):
         line = line.strip()
         if not line or len(line) <= 3:
             continue

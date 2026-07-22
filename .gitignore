@@ -14,3 +14,6 @@ build/
 .build_venv/
 *.spec
 temp/
+*.ps1
+*.bak
+audit.log

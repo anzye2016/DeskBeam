@@ -102,6 +102,7 @@ AUTH_TOKEN = _cfg.get("token", "").strip()
 COOKIE_NAME = "deskbeam_token"
 MAX_FPS = max(_get_int("max_fps", 3), 1)
 GOP_SIZE = max(_get_int("gop", 1), 1)
+AUDIT_LOG = SCRIPT_DIR / "audit.log"
 
 _HAS_MSS = mss is not None
 _HAS_AV = av is not None and np is not None and H264Encoder is not None
@@ -113,6 +114,8 @@ executor = ThreadPoolExecutor(max_workers=4)
 _LOGIN_FAILS = {}
 MAX_LOGIN_FAILS = 5
 LOGIN_BLOCK_SEC = 86400
+_SESSION_MAX_AGE = 86400
+_LOGIN_TIME = {}
 _LOGIN_HTML = ""
 try:
     p = WEB_DIR / "login.html"
@@ -123,6 +126,13 @@ except Exception:
 if not _LOGIN_HTML:
     _LOGIN_HTML = '<!DOCTYPE html><meta charset=utf-8><title>Login</title><form method=get action=/login><input name=token placeholder=Token><button>Login</button></form>'
 
+
+def _audit(event, ip=""):
+    try:
+        with open(AUDIT_LOG, "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {event} {ip}\n")
+    except Exception:
+        pass
 
 def _get_lan_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -156,7 +166,14 @@ def _check_auth(request):
     if not AUTH_TOKEN:
         return True
     cookies = _parse_cookies(request.headers)
-    return cookies.get(COOKIE_NAME) == AUTH_TOKEN
+    token = cookies.get(COOKIE_NAME)
+    if token != AUTH_TOKEN:
+        return False
+    login_time = _LOGIN_TIME.get(token, 0)
+    if time.time() - login_time > _SESSION_MAX_AGE:
+        _LOGIN_TIME.pop(token, None)
+        return False
+    return True
 
 
 def _login_allowed(ip):
@@ -219,8 +236,10 @@ def capture_screen_raw():
                 cs = 16
                 x1, x2 = max(0, cx - cs), min(w - 1, cx + cs)
                 y1, y2 = max(0, cy - cs), min(h - 1, cy + cs)
-                bgra[cy, x1:x2 + 1] = [0, 255, 0, 255]
-                bgra[y1:y2 + 1, cx] = [0, 255, 0, 255]
+                for dy in (-1, 0, 1):
+                    bgra[cy + dy, x1:x2 + 1] = [0, 255, 0, 255]
+                for dx in (-1, 0, 1):
+                    bgra[y1:y2 + 1, cx + dx] = [0, 255, 0, 255]
                 bgra[cy, cx] = [255, 255, 255, 255]
         except Exception:
             pass
@@ -305,7 +324,7 @@ def _transcribe(wav_path):
     lines = []
     for line in out.split("\n"):
         line = line.strip()
-        if not line or len(line) <= 3:
+        if not line:
             continue
         if any(kw in line for kw in ("处理中", "编码", "音频:", "耗时:", "字幕", "处理音频")):
             continue
@@ -388,12 +407,21 @@ async def http_handler(connection, request):
                 return Response(429, "Too Many Requests", Headers({"Content-Type": "text/html; charset=utf-8"}), b"<h1>Blocked for 24h</h1>")
             if token_param == AUTH_TOKEN:
                 _login_ok(ip)
-                cookie = f"{COOKIE_NAME}={AUTH_TOKEN}; Path=/; Max-Age=31536000; SameSite=Lax"
+                _LOGIN_TIME[AUTH_TOKEN] = time.time()
+                _audit("LOGIN OK", ip)
+                cookie = f"{COOKIE_NAME}={AUTH_TOKEN}; Path=/; Max-Age={_SESSION_MAX_AGE}; HttpOnly; SameSite=Strict"
                 return Response(302, "Found", Headers({"Location": "/", "Set-Cookie": cookie}), b"")
             _login_fail(ip)
             error = _LOGIN_HTML.replace("</body>", '<p style="color:#E61919;text-align:center">Invalid token</p></body>')
             return Response(200, "OK", Headers({"Content-Type": "text/html; charset=utf-8"}), error.encode("utf-8"))
         return Response(200, "OK", Headers({"Content-Type": "text/html; charset=utf-8"}), _LOGIN_HTML.encode("utf-8"))
+
+    if path == "/logout":
+        ip = connection.remote_address[0] if connection.remote_address else "0.0.0.0"
+        _audit("LOGOUT", ip)
+        _LOGIN_TIME.pop(AUTH_TOKEN, None)
+        cookie = f"{COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict"
+        return Response(302, "Found", Headers({"Location": "/login", "Set-Cookie": cookie}), b"")
 
     if AUTH_TOKEN and not _check_auth(request):
         return Response(302, "Found", Headers({"Location": "/login"}), b"")
@@ -421,7 +449,8 @@ async def http_handler(connection, request):
 
 # ── WebSocket handler ──
 async def ws_handler(websocket):
-    print(f"WS connected: {websocket.remote_address}")
+    ip = websocket.remote_address[0] if websocket.remote_address else ""
+    _audit("WS CONNECT", ip)
     await websocket.send(json.dumps({"type": "hello", "streaming": _STREAMING}))
     loop = asyncio.get_running_loop()
     interval = 1.0 / MAX_FPS
@@ -521,6 +550,7 @@ async def ws_handler(websocket):
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
+        _audit("WS DISCONNECT", ip)
         running = False
         sender_task.cancel()
         if encoder[0]:
@@ -539,20 +569,18 @@ async def main():
         print("Streaming unavailable — running remote-only mode.")
         print("  Install for streaming: pip install av numpy mss")
 
-    print(f"DeskBeam  https://{LAN_IP}:{PORT}")
-
-    if not SSL_CERT.is_file() or not SSL_KEY.is_file():
-        print("ERROR: SSL cert/key not found. Generate with:")
-        print('  openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 3650 -nodes -subj "/CN=localhost"')
-        sys.exit(1)
+    if SSL_CERT.is_file() and SSL_KEY.is_file():
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ssl_context.load_cert_chain(SSL_CERT, SSL_KEY)
+        proto = "https"
+    else:
+        ssl_context = None
+        proto = "http"
 
     if not WEB_DIR.is_dir():
         print(f"ERROR: web directory not found: {WEB_DIR}")
         print("  The web/ directory contains the browser UI files and must be present.")
         sys.exit(1)
-
-    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ssl_context.load_cert_chain(SSL_CERT, SSL_KEY)
 
     server = await websockets.serve(
         ws_handler,
@@ -563,7 +591,7 @@ async def main():
         ping_interval=30,
         ping_timeout=10,
     )
-    print("Ready.")
+    print(f"Ready.  {proto}://{LAN_IP}:{PORT}")
     await server.wait_closed()
 
 

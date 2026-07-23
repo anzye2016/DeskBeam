@@ -504,6 +504,14 @@ if __name__ == "__main__":
              f"ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"],
             capture_output=True, creationflags=0x08000000, timeout=10,
         )
+        # Kill any process still holding port 8769 (except self)
+        _sp.run(
+            ["powershell", "-NoProfile", "-Command",
+             f"$p=Get-NetTCPConnection -LocalPort {PORT} -ErrorAction SilentlyContinue;"
+             f"if($p){{$p|Where-Object{{$_.OwningProcess -ne {_my_pid}}}|"
+             f"ForEach-Object{{Stop-Process -Id $_.OwningProcess -Force}}}}"],
+            capture_output=True, creationflags=0x08000000, timeout=10,
+        )
     except Exception:
         pass
 

@@ -75,6 +75,8 @@ _defaults = {
     "asr_cooldown": 10,
     "asr_api_url": "",
     "asr_api_key": "",
+    "asr_api_model": "mimo-v2.5-asr",
+    "asr_api_auth": "",
 }
 
 _cfg = {}
@@ -336,13 +338,19 @@ def _transcribe(wav_path):
 def _transcribe_online(wav_path, url, key):
     wav_data = wav_path.read_bytes()
     b64 = base64.b64encode(wav_data).decode()
+    model = _cfg.get("asr_api_model", "").strip() or "mimo-v2.5-asr"
+    auth = _cfg.get("asr_api_auth", "").strip()
+    if auth == "api-key":
+        hdr = ("api-key", key)
+    else:
+        hdr = ("Authorization", f"Bearer {key}")
     body = json.dumps({
-        "model": "mimo-v2.5-asr",
+        "model": model,
         "messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": f"data:audio/wav;base64,{b64}"}}]}],
     }).encode()
     try:
         req = urllib.request.Request(url, data=body, headers={
-            "api-key": key,
+            hdr[0]: hdr[1].encode(),
             "Content-Type": "application/json",
         })
         resp = urllib.request.urlopen(req, timeout=60)

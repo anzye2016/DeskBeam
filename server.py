@@ -347,6 +347,10 @@ _KEY_MAP = {
     "ctrl_x": lambda: keyboard.send("ctrl+x"),
     "ctrl_a": lambda: keyboard.send("ctrl+a"),
     "ctrl_f5": lambda: keyboard.send("ctrl+f5"),
+    "up": lambda: keyboard.press_and_release("up"),
+    "down": lambda: keyboard.press_and_release("down"),
+    "left": lambda: keyboard.press_and_release("left"),
+    "right": lambda: keyboard.press_and_release("right"),
 }
 
 

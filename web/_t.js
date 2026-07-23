@@ -1,70 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
-<title>DeskBeam</title>
-<style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --bg:#0A0A0A;--surface:#121212;--border:#2A2A2A;
-  --text:#D4D4D4;--dim:#71717A;--accent:#E61919;--green:#4AF626;--blue:#3B82F6;--white:#EAEAEA;
-}
-html,body{height:100%;background:var(--bg);color:var(--text);
-  font-family:'JetBrains Mono','SF Mono',monospace;font-size:14px;
-  user-select:none;-webkit-user-select:none;
-}
-body{display:flex;flex-direction:column;height:100dvh;padding:8px;gap:6px;padding-bottom:24px;}
-.bar{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:10px;letter-spacing:.1em;color:var(--dim);}
-.ctl{width:26px;height:26px;border:1px solid var(--border);background:var(--surface);color:var(--dim);
-  font-family:inherit;font-size:12px;cursor:pointer;line-height:1;}
-.ctl:active{background:var(--text);color:var(--bg);}
-.zoom-lbl{font-size:10px;width:36px;text-align:center;display:inline-flex;align-items:center;justify-content:center;height:26px;}
-.mode-btn{height:26px;padding:0 10px;border:1px solid var(--blue);background:var(--surface);color:var(--blue);
-  font-family:inherit;font-size:9px;font-weight:600;text-transform:uppercase;cursor:pointer;}
-.mode-btn.on{color:var(--green);border-color:var(--green);}
-.touch{flex:1;min-height:0;position:relative;overflow:hidden;background:var(--surface);border:1px solid var(--border);touch-action:none;}
-.touch img,.touch canvas{display:block;}
-.touch .ph{display:flex;align-items:center;justify-content:center;width:100%;height:100%;color:var(--dim);font-size:10px;letter-spacing:.1em;}
-.scroll-wrap{width:100%;height:100%;overflow:hidden;}
-.mouse{display:grid;grid-template-columns:repeat(6,minmax(52px,1fr));gap:4px;}
-.k{height:38px;padding:0 6px;min-width:52px;flex-shrink:0;border:1px solid var(--border);background:var(--surface);color:var(--dim);
-  font-family:inherit;font-size:10px;font-weight:600;text-transform:uppercase;cursor:pointer;touch-action:manipulation;white-space:nowrap;}
-.k:active{background:var(--text);color:var(--bg);transform:scale(.97);}
-.input-row{display:grid;grid-template-columns:1fr auto auto;gap:6px;}
-textarea{padding:6px 10px;background:var(--surface);border:1px solid var(--border);color:var(--text);
-  font-family:inherit;font-size:13px;outline:none;resize:none;line-height:1.3;-webkit-appearance:none;}
-textarea:focus{border-color:var(--blue);}
-.send,.rec{width:56px;border:1px solid;font-family:inherit;font-size:10px;font-weight:600;cursor:pointer;}
-.send{border-color:var(--blue);color:var(--blue);background:var(--surface);}
-.send:active{background:var(--blue);color:var(--bg);}
-.rec{border-color:var(--accent);background:var(--surface);color:var(--dim);font-size:8px;font-weight:700;}
-.rec:active,.rec.pressed{background:var(--accent);color:var(--white);}
-.input-row.recording{position:relative;}.input-row.recording .send{display:none;}.input-row.recording .rec{position:absolute;left:0;right:0;top:0;bottom:0;width:100%;font-size:14px;z-index:2;background:var(--accent);color:var(--white);}
-.keys{overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;display:flex;gap:4px;overscroll-behavior:contain;}
-</style>
-</head>
-<body>
-<div class="bar">
-  <span id="st">CONNECTING</span>
-  <span id="pz" style="display:none"><button class="ctl" id="pl">&lt;</button><button class="ctl" id="pu">&and;</button><button class="ctl" id="pd">&or;</button><button class="ctl" id="pr">&gt;</button>
-    <button class="ctl" id="zo">-</button><span class="zoom-lbl" id="zl">Fit</span><button class="ctl" id="zi">+</button></span>
-  <button class="mode-btn" id="mb">REMOTE</button>
-</div>
-<div class="touch" id="ta" tabindex="-1">
-  <div id="ph"></div>
-  <div class="scroll-wrap" id="sw"><canvas id="cv"></canvas></div>
-</div>
-<div class="mouse">
-  <button class="k" data-c="mouse_click">L</button><button class="k" data-c="mouse_middle">M</button><button class="k" data-c="mouse_right">R</button>
-  <button class="k" id="dr">Drag</button><button class="k" id="su">▲</button><button class="k" id="sd">▼</button>
-</div>
-<div class="input-row">
-  <textarea id="ti" placeholder="Type here..." rows="3"></textarea>
-  <button class="rec" id="rc">REC</button><button class="send" id="sn">Send</button>
-</div>
-<div class="keys" id="ks"></div>
-<script>
+
 var K=[['Ctrl+C','ctrl_c'],['Enter','enter'],['Esc','esc'],['Backspace','backspace'],['Ctrl+V','ctrl_v'],['Ctrl+A','ctrl_a'],['Ctrl+Z','ctrl_z'],['Ctrl+X','ctrl_x'],['Ctrl+S','ctrl_s'],['Tab','tab'],['Alt+Tab','alt_tab'],['Win','win'],['F5','f5'],['Ctrl+F5','ctrl_f5'],['Ctrl+J','ctrl_j'],['Shift+Enter','shift_enter'],['↑','up'],['↓','down'],['←','left'],['→','right']];
 var ks=document.getElementById('ks');K.forEach(function(d){var b=document.createElement('button');b.className='k';b.textContent=d[0];b.dataset.c=d[1];ks.appendChild(b);});
 var cv=document.getElementById('cv'),sw=document.getElementById('sw'),ta=document.getElementById('ta'),ti=document.getElementById('ti');
@@ -94,6 +28,3 @@ function wv(s,sr){var b=new ArrayBuffer(44+s.length*2),v=new DataView(b),w=funct
 function rs(){if(_rr)return;_rr=true;_ch=[];rc.classList.add('pressed');rc.parentElement.classList.add('recording');navigator.mediaDevices.getUserMedia({audio:{sampleRate:16000,channelCount:1}}).then(function(s){if(!_rr){s.getTracks().forEach(function(t){t.stop();});return}_st=s;_ac=new(window.AudioContext||window.webkitAudioContext)({sampleRate:16000});var src=_ac.createMediaStreamSource(s);var blob=new Blob(["class P extends AudioWorkletProcessor{process(i,o){const c=i[0][0];for(let n=0;n<c.length;n++)o[0][0][n]=c[n];this.port.postMessage(new Float32Array(c));return true}}registerProcessor('r',P);"],{type:'application/javascript'});var url=URL.createObjectURL(blob);_ac.audioWorklet.addModule(url).then(function(){var nd=new AudioWorkletNode(_ac,'r',{channelCount:1});nd.port.onmessage=function(e){if(_rr)_ch.push(e.data);};src.connect(nd);URL.revokeObjectURL(url);});}).catch(function(){re(true);});}
 function re(si){if(!_rr)return;_rr=false;rc.classList.remove('pressed');rc.parentElement.classList.remove('recording');ti.blur();if(_st){_st.getTracks().forEach(function(t){t.stop();});_st=null;}if(_ac){_ac.close();_ac=null;}if(si)return;var l=_ch.reduce(function(s,c){return s+c.length;},0);if(l===0)return;var sa=new Float32Array(l),off=0;_ch.forEach(function(c){sa.set(c,off);off+=c.length;});if(ws&&ws.readyState===WebSocket.OPEN)ws.send(wv(sa,16000));}
 rc.addEventListener('touchstart',function(e){e.preventDefault();rs();});rc.addEventListener('touchend',function(e){e.preventDefault();re();});rc.addEventListener('mousedown',function(e){e.preventDefault();rs();});rc.addEventListener('mouseup',function(e){e.preventDefault();re();});
-</script>
-</body>
-</html>

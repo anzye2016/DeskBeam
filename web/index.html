@@ -72,7 +72,7 @@ var st=document.getElementById('st');let ws=null,_so=false,_dm=false;var _px=0,_
 var mb=document.getElementById('mb');
 function sm(on){_so=on;mb.textContent=on?'SCREEN':'REMOTE';mb.className='mode-btn'+(on?' on':'');sw.style.display=on?'':'none';if(on)sw.style.overflow='auto';document.getElementById('ph').style.display=on?'none':'';document.getElementById('pz').style.display=on?'':'none';if(on){_fts=[];document.getElementById('ph').innerHTML='';}else{_fts=[];st.textContent='LIVE';if(decoder){try{decoder.close();}catch(e){}decoder=null;}document.getElementById('ph').innerHTML='<div class=ph>REMOTE MODE</div>';}if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({type:'set_mode',screen:on}));}
 mb.addEventListener('click',function(){sm(!_so);});
-document.getElementById('st').addEventListener('click',function(){if(confirm('Logout?'))location.href='/logout';});
+document.getElementById('st').addEventListener('click',function(){if(confirm('Logout?'))location.href='/logout';else if(confirm('Shutdown DeskBeam?'))location.href='/shutdown';});
 var _zi=0,Z=['Fit','1.5x','2x','3x','4x'],ZF=[0,1.5,2,3,4];
 function zs(i){_zi=Math.max(0,Math.min(Z.length-1,i));var z=ZF[_zi];if(z===0){cv.style.width='';cv.style.maxWidth='100%';cv.style.maxHeight='100%';}else{cv.style.maxWidth='none';cv.style.maxHeight='none';cv.style.width=(z*100)+'%';}document.getElementById('zl').textContent=Z[_zi];}
 document.getElementById('zi').addEventListener('click',function(){zs(_zi+1);});document.getElementById('zo').addEventListener('click',function(){zs(_zi-1);});zs(0);

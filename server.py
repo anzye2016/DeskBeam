@@ -423,6 +423,12 @@ async def http_handler(connection, request):
         cookie = f"{COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict"
         return Response(302, "Found", Headers({"Location": "/login", "Set-Cookie": cookie}), b"")
 
+    if path == "/shutdown":
+        _audit("SHUTDOWN", connection.remote_address[0] if connection.remote_address else "")
+        _ = threading.Thread(target=lambda: os._exit(0), daemon=True)
+        _.start()
+        return Response(200, "OK", Headers({"Content-Type": "text/plain"}), b"Server shutting down...")
+
     if AUTH_TOKEN and not _check_auth(request):
         return Response(302, "Found", Headers({"Location": "/login"}), b"")
 

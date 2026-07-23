@@ -180,27 +180,16 @@ WebRTC uses the browser's native H.264 decoder. Shares the same screen capture +
 
 ## 10. Voice Recognition (Optional)
 
-Two modes: online API or local WSL ASR. **Online takes priority** when API key is configured.
+ASR architecture:
 
-### Option A: Online API (Recommended)
-
-```json
-// config.json
-"asr_api_url": "https://api.xiaomimimo.com/v1/chat/completions",
-"asr_api_key": "your-api-key"
+```
+Recording → server.py ─┬── asr_api_url set → server.py calls online API directly
+                       └── fallback → WSL → asr.py → local model (:8082)
 ```
 
-Compatible with OpenAI-format speech recognition APIs (e.g., Xiaomi MiMo ASR). Audio is sent as base64, transcription is typed into the focused window.
+**Online API** — built into `server.py`. Configure via `config.json`, no external dependencies.
 
-### Option B: WSL Local Model
-
-Requires WSL and a running ASR model server (default port 8082). The project includes `asr.py`:
-
-```bash
-# In WSL
-cp asr.py ~/scripts/
-# Start ASR model server on 127.0.0.1:8082
-```
+**Local WSL** — handled by the external `asr.py` script. The project code doesn't care about model details. `asr.py` forwards WAV audio to the local ASR model server (default `127.0.0.1:8082`). To switch models, just change the `SERVER` variable in `asr.py` — no project code changes needed.
 
 ### Configuration
 

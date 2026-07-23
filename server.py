@@ -63,7 +63,11 @@ _defaults = {
     "ssl_key": "key.pem",
     "web_dir": "web",
     "token": "",
-    "max_fps": 3,
+    "max_fps": 15,
+    "max_fps_lan": 60,
+    "gop": 10,
+    "gop_lan": 1,
+    "streaming": True,
     "streaming": True,
     "gop": 1,
     "wsl_asr_script": "~/scripts/asr.py",
@@ -109,8 +113,8 @@ except Exception:
     TEMP_DIR.mkdir(exist_ok=True)
 AUTH_TOKEN = _cfg.get("token", "").strip()
 COOKIE_NAME = "deskbeam_token"
-MAX_FPS = max(_get_int("max_fps", 3), 1)
-GOP_SIZE = max(_get_int("gop", 1), 1)
+MAX_FPS = max(_get_int("max_fps", 15), 1)
+GOP_SIZE = max(_get_int("gop", 10), 1)
 AUDIT_LOG = SCRIPT_DIR / "audit.log"
 
 _HAS_MSS = mss is not None
@@ -118,6 +122,13 @@ _HAS_AV = av is not None and np is not None and H264Encoder is not None
 _STREAMING = _HAS_MSS and _HAS_AV and _cfg.get("streaming", True)
 
 executor = ThreadPoolExecutor(max_workers=4)
+
+
+def _is_lan(ip):
+    return ip.startswith(("192.168.", "10.", "172.16.", "172.17.", "172.18.", "172.19.",
+                          "172.20.", "172.21.", "172.22.", "172.23.", "172.24.",
+                          "172.25.", "172.26.", "172.27.", "172.28.", "172.29.",
+                          "172.30.", "172.31.")) or ip == "127.0.0.1"
 
 # ── Auth helpers ──
 _LOGIN_FAILS = {}
@@ -500,9 +511,12 @@ async def http_handler(connection, request):
 async def ws_handler(websocket):
     ip = websocket.remote_address[0] if websocket.remote_address else ""
     _audit("WS CONNECT", ip)
+    lan = _is_lan(ip)
+    fps = max(_get_int("max_fps_lan", MAX_FPS) if lan else MAX_FPS, 1)
+    gop = max(_get_int("gop_lan", GOP_SIZE) if lan else GOP_SIZE, 1)
     await websocket.send(json.dumps({"type": "hello", "streaming": _STREAMING}))
     loop = asyncio.get_running_loop()
-    interval = 1.0 / MAX_FPS
+    interval = 1.0 / fps
     running = True
     streaming = [False]
     encoder = [None]
@@ -516,7 +530,7 @@ async def ws_handler(websocket):
                     if encoder[0] is None:
                         raw, w, h = await loop.run_in_executor(executor, capture_screen_raw)
                         if raw:
-                            encoder[0] = H264Encoder(w, h, fps=MAX_FPS, gop=GOP_SIZE)
+                            encoder[0] = H264Encoder(w, h, fps=fps, gop=gop)
                             await websocket.send(json.dumps({
                                 "type": "screen_config",
                                 "codec": "avc1.42001F",
@@ -608,7 +622,7 @@ async def ws_handler(websocket):
                             except Exception:
                                 pass
                         s = WebRTCSession(_webrtc_send)
-                        s.add_track(capture_screen_raw, MAX_FPS)
+                        s.add_track(capture_screen_raw, fps)
                         offer = await s.create_offer()
                         _webrtc = s
                         await websocket.send(json.dumps({

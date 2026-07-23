@@ -1,6 +1,7 @@
 """DeskBeam — desktop streaming and remote control for Windows."""
 
 import asyncio
+import base64
 import ctypes
 import ctypes.wintypes
 import json
@@ -322,19 +323,22 @@ def _transcribe(wav_path):
 
 def _transcribe_online(wav_path, url, key):
     wav_data = wav_path.read_bytes()
-    boundary = b"----BOUNDARY"
-    body = b"--" + boundary + b"\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\nContent-Type: audio/wav\r\n\r\n" + wav_data + b"\r\n--" + boundary + b"--\r\n"
+    b64 = base64.b64encode(wav_data).decode()
+    body = json.dumps({
+        "model": "mimo-v2.5-asr",
+        "messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": f"data:audio/wav;base64,{b64}"}}]}],
+    }).encode()
     try:
         req = urllib.request.Request(url, data=body, headers={
-            "Authorization": f"Bearer {key}".encode(),
-            "Content-Type": f"multipart/form-data; boundary={boundary.decode()}",
+            "api-key": key,
+            "Content-Type": "application/json",
         })
         resp = urllib.request.urlopen(req, timeout=60)
         data = json.loads(resp.read())
     except Exception as e:
         print(f"  ASR error: {e}")
         return ""
-    text = data.get("text", "").strip()
+    text = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
     return text
 
 

@@ -10,6 +10,6 @@
     "wsl_asr_script": "~/scripts/asr.py",
     "asr_health_url": "http://127.0.0.1:8082/healthz",
     "asr_cooldown": 10,
-    "asr_api_url": "https://api.openai.com/v1/audio/transcriptions",
+    "asr_api_url": "https://api.xiaomimimo.com/v1/chat/completions",
     "asr_api_key": ""
 }

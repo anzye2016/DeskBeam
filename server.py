@@ -77,6 +77,7 @@ _defaults = {
     "asr_api_key": "",
     "asr_api_model": "mimo-v2.5-asr",
     "asr_api_auth": "",
+    "asr_api_response_path": "choices.0.message.content",
 }
 
 _cfg = {}
@@ -358,8 +359,13 @@ def _transcribe_online(wav_path, url, key):
     except Exception as e:
         print(f"  ASR error: {e}")
         return ""
-    text = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-    return text
+    path = (_cfg.get("asr_api_response_path", "") or "choices.0.message.content").split(".")
+    val = data
+    for k in path:
+        if not k: continue
+        try: val = val[int(k)] if k.isdigit() or (k[0] == '-' and k[1:].isdigit()) else val.get(k, "")
+        except: val = ""
+    return str(val).strip()
 
 
 def _transcribe_local(wav_path):

@@ -180,18 +180,37 @@ WebRTC uses the browser's native H.264 decoder. Shares the same screen capture +
 
 ## 10. Voice Recognition (Optional)
 
-Voice recognition requires WSL (Windows Subsystem for Linux) and a running ASR model server (default port 8082). The project's `asr.py` script forwards recorded audio to the model.
+Two modes: online API or local WSL ASR. **Online takes priority** when API key is configured.
 
-### Quick Start
+### Option A: Online API (Recommended)
 
-```bash
-# Inside WSL, copy the script
-cp asr.py ~/scripts/
-# Deploy an ASR model server on 127.0.0.1:8082
-# e.g., Qwen3-ASR-0.6B
+```json
+// config.json
+"asr_api_url": "https://api.xiaomimimo.com/v1/chat/completions",
+"asr_api_key": "your-api-key"
 ```
 
-When recording finishes, DeskBeam sends the WAV audio to the ASR server, receives the transcription, and types it into the focused window.
+Compatible with OpenAI-format speech recognition APIs (e.g., Xiaomi MiMo ASR). Audio is sent as base64, transcription is typed into the focused window.
+
+### Option B: WSL Local Model
+
+Requires WSL and a running ASR model server (default port 8082). The project includes `asr.py`:
+
+```bash
+# In WSL
+cp asr.py ~/scripts/
+# Start ASR model server on 127.0.0.1:8082
+```
+
+### Configuration
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `asr_api_url` | `""` | Online API URL (empty = local) |
+| `asr_api_key` | `""` | Online API key |
+| `wsl_asr_script` | `~/scripts/asr.py` | WSL ASR script path |
+| `asr_health_url` | `http://127.0.0.1:8082/healthz` | WSL health check URL |
+| `asr_cooldown` | `10` | WSL retry interval (seconds) |
 
 ---
 

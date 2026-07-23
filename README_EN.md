@@ -197,6 +197,9 @@ Recording → server.py ─┬── asr_api_url set → server.py calls online 
 |-----|---------|-------------|
 | `asr_api_url` | `""` | Online API URL (empty = local) |
 | `asr_api_key` | `""` | Online API key |
+| `asr_api_model` | `mimo-v2.5-asr` | Online API model name |
+| `asr_api_auth` | `""` | Auth header (`api-key` or empty = Bearer) |
+| `asr_api_response_path` | `choices.0.message.content` | JSON path to extract text from response |
 | `wsl_asr_script` | `~/scripts/asr.py` | WSL ASR script path |
 | `asr_health_url` | `http://127.0.0.1:8082/healthz` | WSL health check URL |
 | `asr_cooldown` | `10` | WSL retry interval (seconds) |

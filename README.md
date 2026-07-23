@@ -197,6 +197,9 @@ ASR 架构：
 |---|-------|------|
 | `asr_api_url` | `""` | 在线 API 地址（留空走本地） |
 | `asr_api_key` | `""` | 在线 API 密钥 |
+| `asr_api_model` | `mimo-v2.5-asr` | 在线 API 模型名 |
+| `asr_api_auth` | `""` | 认证头（`api-key` 或空 = Bearer） |
+| `asr_api_response_path` | `choices.0.message.content` | 响应中提取文字的路径 |
 | `wsl_asr_script` | `~/scripts/asr.py` | WSL 内 ASR 脚本路径 |
 | `asr_health_url` | `http://127.0.0.1:8082/healthz` | WSL ASR 健康检查地址 |
 | `asr_cooldown` | `10` | WSL ASR 重试间隔（秒） |

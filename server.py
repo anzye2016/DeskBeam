@@ -563,6 +563,10 @@ async def ws_handler(websocket):
                 elif cmd == "scroll_down":
                     await loop.run_in_executor(executor, do_mouse, "scroll", 0, -1)
                 elif cmd == "set_mode":
+                    if not msg.get("screen", False):
+                        if _webrtc:
+                            await _webrtc.close()
+                            _webrtc = None
                     streaming[0] = msg.get("screen", False)
                     if streaming[0] and WebRTCSession and msg.get("format") == "webrtc":
                         async def _webrtc_send(data):
@@ -579,8 +583,6 @@ async def ws_handler(websocket):
                             "sdp": offer.sdp,
                             "sdp_type": offer.type,
                         }))
-                    else:
-                        _webrtc = None
                 elif cmd == "webrtc_answer":
                     if _webrtc:
                         await _webrtc.handle_answer(msg["sdp"], msg.get("sdp_type", "answer"))

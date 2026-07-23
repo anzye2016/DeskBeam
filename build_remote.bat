@@ -24,7 +24,7 @@ pyinstaller --onefile --noconsole --uac-admin ^
     --hidden-import websockets.http11 ^
     --hidden-import websockets.datastructures ^
     --hidden-import keyboard._winkeyboard ^
-    server.py
+    server_remote.py
 
 if errorlevel 1 ( echo ERROR: build failed & exit /b 1 )
 

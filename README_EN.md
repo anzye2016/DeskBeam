@@ -143,11 +143,11 @@ stop.bat       # kill server
 
 | Browser | Remote | Screen |
 |---------|:---:|:---:|
-| Chrome / Edge 94+ | Yes | Yes |
-| Opera / Brave | Yes | Yes |
-| Firefox | Yes | No |
-| Safari | Yes | No |
-| iOS browsers | Yes | No |
+| Chrome / Edge 94+ | Yes | Yes (VideoDecoder) |
+| Opera / Brave | Yes | Yes (VideoDecoder) |
+| Firefox | Yes | Yes (WebRTC) |
+| Safari | Yes | Yes (WebRTC) |
+| iOS browsers | Yes | Yes (WebRTC) |
 
 ---
 
@@ -166,7 +166,19 @@ P-frames drop to ~200 bytes on static content.
 
 ---
 
-## 9. Voice Recognition (Optional)
+## 9. WebRTC Fallback
+
+Auto-switches to WebRTC when the browser doesn't support `VideoDecoder` (Firefox/Safari). Requires `aiortc`:
+
+```powershell
+pip install aiortc
+```
+
+WebRTC uses the browser's native H.264 decoder. Shares the same screen capture + encoding pipeline as VideoDecoder mode.
+
+---
+
+## 10. Voice Recognition (Optional)
 
 Voice recognition requires WSL (Windows Subsystem for Linux) and a running ASR model server (default port 8082). The project's `asr.py` script forwards recorded audio to the model.
 
@@ -183,7 +195,7 @@ When recording finishes, DeskBeam sends the WAV audio to the ASR server, receive
 
 ---
 
-## 10. Architecture
+## 11. Architecture
 
 ```
 Browser                                     Python server
@@ -199,7 +211,7 @@ Browser                                     Python server
 
 ---
 
-## 11. Security
+## 12. Security
 
 | Layer | Mechanism |
 |-------|-----------|
@@ -226,12 +238,13 @@ On LAN, an attacker can redirect traffic + present a fake cert → full MITM (de
 
 ---
 
-## 12. File Structure
+## 13. File Structure
 
 ```
 ├── server.py              # Main server (full mode)
 ├── server_remote.py       # Remote-only (for exe builds)
 ├── asr.py                 # Voice-to-text script (WSL, needs ASR server)
+├── webrtc_streamer.py     # WebRTC fallback for Firefox/Safari
 ├── encoder.py             # H.264 encoder (PyAV)
 ├── requirements.txt       # Full mode deps
 ├── requirements-remote.txt
@@ -250,7 +263,7 @@ On LAN, an attacker can redirect traffic + present a fake cert → full MITM (de
 
 ---
 
-## 13. Disclaimer
+## 14. Disclaimer
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. Misconfiguration (weak token, untrusted network, leaked secrets) may lead to unauthorized access, data loss, or other damages. The authors assume no liability. Use at your own risk.
 
@@ -258,6 +271,6 @@ This software provides full access to the controlled computer. Only use it on ma
 
 ---
 
-## 14. License
+## 15. License
 
 MIT — see [LICENSE](LICENSE)

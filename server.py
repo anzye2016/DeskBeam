@@ -32,10 +32,11 @@ except ImportError:
     av = None
 
 try:
-    from encoder import H264Encoder, has_idr
+    from encoder import H264Encoder, has_idr, MP4Muxer
 except ImportError:
     H264Encoder = None
     has_idr = None
+    MP4Muxer = None
 
 import websockets
 from websockets.http11 import Response
@@ -464,9 +465,10 @@ async def ws_handler(websocket):
     running = True
     streaming = [False]
     encoder = [None]
+    muxer = [None]
+    clientFormat = ["fmp4"]
 
     async def screen_sender():
-        """Capture, encode H.264, and send."""
         while running:
             if streaming[0] and _STREAMING:
                 try:
@@ -474,21 +476,43 @@ async def ws_handler(websocket):
                         raw, w, h = await loop.run_in_executor(executor, capture_screen_raw)
                         if raw:
                             encoder[0] = H264Encoder(w, h, fps=MAX_FPS, gop=GOP_SIZE)
-                            await websocket.send(json.dumps({
+                            is_fmp4 = clientFormat[0] == "fmp4" and MP4Muxer is not None
+                            fmt = "fmp4" if is_fmp4 else "annexb"
+                            info = {
                                 "type": "screen_config",
                                 "codec": "avc1.42001F",
                                 "width": w,
                                 "height": h,
-                            }))
-                            h264 = encoder[0].encode(raw)
-                            if h264:
-                                await websocket.send((b"\x01" if has_idr(h264) else b"\x00") + h264)
+                                "format": fmt,
+                            }
+                            if is_fmp4:
+                                muxer[0] = MP4Muxer()
+                                h264 = encoder[0].encode(raw)
+                                if h264:
+                                    seg = muxer[0].mux(h264, int(interval * 90000), has_idr(h264))
+                                    init = muxer[0].init_segment()
+                                    if init:
+                                        info["init"] = len(init)
+                                        await websocket.send(json.dumps(info))
+                                        await websocket.send(b"\x02" + init)
+                                    if seg:
+                                        await websocket.send(b"\x03" + seg)
+                            else:
+                                await websocket.send(json.dumps(info))
+                                h264 = encoder[0].encode(raw)
+                                if h264:
+                                    await websocket.send((b"\x01" if has_idr(h264) else b"\x00") + h264)
                     else:
                         raw, _, _ = await loop.run_in_executor(executor, capture_screen_raw)
                         if raw:
                             h264 = encoder[0].encode(raw)
                             if h264:
-                                await websocket.send((b"\x01" if has_idr(h264) else b"\x00") + h264)
+                                if muxer[0]:
+                                    seg = muxer[0].mux(h264, int(interval * 90000), has_idr(h264))
+                                    if seg:
+                                        await websocket.send(b"\x03" + seg)
+                                else:
+                                    await websocket.send((b"\x01" if has_idr(h264) else b"\x00") + h264)
                 except websockets.exceptions.ConnectionClosed:
                     return
                 except Exception:
@@ -497,6 +521,7 @@ async def ws_handler(websocket):
                 if encoder[0]:
                     encoder[0].close()
                     encoder[0] = None
+                muxer[0] = None
             await asyncio.sleep(interval)
 
     sender_task = asyncio.create_task(screen_sender())
@@ -554,6 +579,9 @@ async def ws_handler(websocket):
                     await loop.run_in_executor(executor, do_mouse, "scroll", 0, -1)
                 elif cmd == "set_mode":
                     streaming[0] = msg.get("screen", False)
+                    fmt = msg.get("format", "")
+                    if fmt in ("fmp4", "annexb"):
+                        clientFormat[0] = fmt
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:

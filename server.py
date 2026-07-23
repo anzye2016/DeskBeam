@@ -427,8 +427,7 @@ async def http_handler(connection, request):
         _audit("SHUTDOWN", connection.remote_address[0] if connection.remote_address else "")
         try: PID_FILE.unlink(missing_ok=True)
         except Exception: pass
-        _ = threading.Thread(target=lambda: os._exit(0), daemon=True)
-        _.start()
+        _server.close()
         return Response(200, "OK", Headers({"Content-Type": "text/plain"}), b"Server shutting down...")
 
     if AUTH_TOKEN and not _check_auth(request):

@@ -1,6 +1,7 @@
 """DeskBeam — desktop streaming and remote control for Windows."""
 
 import asyncio
+import base64
 import ctypes
 import ctypes.wintypes
 import json
@@ -13,6 +14,7 @@ import tempfile
 import threading
 import time
 import traceback
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -40,6 +42,8 @@ _defaults = {
     "wsl_asr_script": "~/scripts/asr.py",
     "asr_health_url": "http://127.0.0.1:8082/healthz",
     "asr_cooldown": 10,
+    "asr_api_url": "",
+    "asr_api_key": "",
 }
 
 _cfg = {}
@@ -237,6 +241,35 @@ def _ensure_asr():
 
 
 def _transcribe(wav_path):
+    api_url = _cfg.get("asr_api_url", "").strip()
+    api_key = _cfg.get("asr_api_key", "").strip()
+    if api_url and api_key:
+        return _transcribe_online(wav_path, api_url, api_key)
+    return _transcribe_local(wav_path)
+
+
+def _transcribe_online(wav_path, url, key):
+    wav_data = wav_path.read_bytes()
+    b64 = base64.b64encode(wav_data).decode()
+    body = json.dumps({
+        "model": "mimo-v2.5-asr",
+        "messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": f"data:audio/wav;base64,{b64}"}}]}],
+    }).encode()
+    try:
+        req = urllib.request.Request(url, data=body, headers={
+            "api-key": key,
+            "Content-Type": "application/json",
+        })
+        resp = urllib.request.urlopen(req, timeout=60)
+        data = json.loads(resp.read())
+    except Exception as e:
+        print(f"  ASR error: {e}")
+        return ""
+    text = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+    return text
+
+
+def _transcribe_local(wav_path):
     if not _ensure_asr():
         return "[ASR not available]"
 

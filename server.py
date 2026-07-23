@@ -9,10 +9,10 @@ import socket
 import ssl
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import traceback
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -67,6 +67,8 @@ _defaults = {
     "wsl_asr_script": "~/scripts/asr.py",
     "asr_health_url": "http://127.0.0.1:8082/healthz",
     "asr_cooldown": 10,
+    "asr_api_url": "",
+    "asr_api_key": "",
 }
 
 _cfg = {}
@@ -311,6 +313,32 @@ def _ensure_asr():
 
 
 def _transcribe(wav_path):
+    api_url = _cfg.get("asr_api_url", "").strip()
+    api_key = _cfg.get("asr_api_key", "").strip()
+    if api_url and api_key:
+        return _transcribe_online(wav_path, api_url, api_key)
+    return _transcribe_local(wav_path)
+
+
+def _transcribe_online(wav_path, url, key):
+    wav_data = wav_path.read_bytes()
+    boundary = b"----BOUNDARY"
+    body = b"--" + boundary + b"\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\nContent-Type: audio/wav\r\n\r\n" + wav_data + b"\r\n--" + boundary + b"--\r\n"
+    try:
+        req = urllib.request.Request(url, data=body, headers={
+            "Authorization": f"Bearer {key}".encode(),
+            "Content-Type": f"multipart/form-data; boundary={boundary.decode()}",
+        })
+        resp = urllib.request.urlopen(req, timeout=60)
+        data = json.loads(resp.read())
+    except Exception as e:
+        print(f"  ASR error: {e}")
+        return ""
+    text = data.get("text", "").strip()
+    return text
+
+
+def _transcribe_local(wav_path):
     if not _ensure_asr():
         return "[ASR not available]"
 

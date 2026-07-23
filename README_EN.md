@@ -234,7 +234,9 @@ On LAN, an attacker can redirect traffic + present a fake cert → full MITM (de
 
 ## 12. Disclaimer
 
-DeskBeam provides remote desktop access. Misconfiguration (weak token, untrusted network, leaked secrets) may lead to unauthorized access, data loss, or other damages. The authors assume no liability. Use at your own risk.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. Misconfiguration (weak token, untrusted network, leaked secrets) may lead to unauthorized access, data loss, or other damages. The authors assume no liability. Use at your own risk.
+
+This software provides full access to the controlled computer. Only use it on machines you own or are legally authorized to access. Compliance with local laws and regulations is your sole responsibility. See [MIT License](LICENSE) for details.
 
 ---
 

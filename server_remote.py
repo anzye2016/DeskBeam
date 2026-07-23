@@ -359,6 +359,8 @@ async def http_handler(connection, request):
 
     if path == "/shutdown":
         _audit("SHUTDOWN", connection.remote_address[0] if connection.remote_address else "")
+        try: PID_FILE.unlink(missing_ok=True)
+        except Exception: pass
         _server.close()
         return Response(200, "OK", Headers({"Content-Type": "text/plain"}), b"Server shutting down...")
 

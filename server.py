@@ -37,6 +37,11 @@ except ImportError:
     H264Encoder = None
     has_idr = None
 
+try:
+    from webrtc_streamer import WebRTCSession
+except ImportError:
+    WebRTCSession = None
+
 import websockets
 from websockets.http11 import Response
 from websockets.datastructures import Headers
@@ -468,11 +473,12 @@ async def ws_handler(websocket):
     running = True
     streaming = [False]
     encoder = [None]
+    _webrtc = None
 
     async def screen_sender():
         """Capture, encode H.264, and send."""
         while running:
-            if streaming[0] and _STREAMING:
+            if streaming[0] and _STREAMING and not _webrtc:
                 try:
                     if encoder[0] is None:
                         raw, w, h = await loop.run_in_executor(executor, capture_screen_raw)
@@ -558,6 +564,29 @@ async def ws_handler(websocket):
                     await loop.run_in_executor(executor, do_mouse, "scroll", 0, -1)
                 elif cmd == "set_mode":
                     streaming[0] = msg.get("screen", False)
+                    if streaming[0] and WebRTCSession and msg.get("format") == "webrtc":
+                        async def _webrtc_send(data):
+                            try:
+                                await websocket.send(data)
+                            except Exception:
+                                pass
+                        s = WebRTCSession(_webrtc_send)
+                        s.add_track(capture_screen_raw, MAX_FPS)
+                        offer = await s.create_offer()
+                        _webrtc = s
+                        await websocket.send(json.dumps({
+                            "type": "webrtc_offer",
+                            "sdp": offer.sdp,
+                            "sdp_type": offer.type,
+                        }))
+                    else:
+                        _webrtc = None
+                elif cmd == "webrtc_answer":
+                    if _webrtc:
+                        await _webrtc.handle_answer(msg["sdp"], msg.get("sdp_type", "answer"))
+                elif cmd == "webrtc_ice":
+                    if _webrtc:
+                        await _webrtc.add_ice(msg["candidate"])
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
@@ -567,6 +596,8 @@ async def ws_handler(websocket):
         if encoder[0]:
             encoder[0].close()
             encoder[0] = None
+        if _webrtc:
+            asyncio.ensure_future(_webrtc.close())
         try:
             await sender_task
         except asyncio.CancelledError:

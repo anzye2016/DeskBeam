@@ -466,7 +466,7 @@ async def ws_handler(websocket):
     streaming = [False]
     encoder = [None]
     muxer = [None]
-    clientFormat = ["fmp4"]
+    clientFormat = ["annexb"]
 
     async def screen_sender():
         while running:

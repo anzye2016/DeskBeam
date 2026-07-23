@@ -1,112 +1,114 @@
-# DeskBeam / 桌面光束
+# DeskBeam
 
-Browser-based Windows desktop streaming and remote control. | 基于浏览器的 Windows 桌面串流与远程遥控。
+基于浏览器的 Windows 桌面串流与远程遥控。
 
-Two deployment modes | 两种部署模式：
-- **Full | 完整版**: desktop streaming (H.264) + remote control (mouse/keyboard/text/voice) | 桌面串流 + 远程控制
-- **Remote-only | 纯遥控**: mouse/keyboard/text/voice — no GPU or screen capture deps | 仅鼠标/键盘/文字/语音，无需 GPU
+两种部署模式：
+- **完整版**: 桌面串流（H.264） + 远程控制（鼠标/键盘/文字/语音）
+- **纯遥控**: 鼠标/键盘/文字/语音 — 无需 GPU
 
-Hardware H.264 encoding via NVENC/QSV/AMF. Touchpad, mouse, keyboard, text input, voice-to-text. Deploy as Python source or compile to a single portable exe. | 硬件 H.264 编码（NVENC/QSV/AMF），触控板/鼠标/键盘/文字输入/语音转文字。支持 Python 源码运行或编译为单文件 exe。
+硬件 H.264 编码（NVENC/QSV/AMF），触控板/鼠标/键盘/文字输入/语音转文字。支持 Python 源码运行或编译为单文件 exe。
 
 <p align="center">
-  <img src="docs/screen.jpg" width="45%" alt="SCREEN mode">
-  <img src="docs/remote.jpg" width="45%" alt="REMOTE mode">
+  <img src="docs/screen.jpg" width="45%" alt="SCREEN 模式">
+  <img src="docs/remote.jpg" width="45%" alt="REMOTE 模式">
 </p>
 
 ---
 
-## 1. Requirements / 环境要求
+## 1. 环境要求
 
-| Requirement | Full | Remote-only |
-|-------------|------|-------------|
-| Windows 10+ | Yes | Yes |
-| Python 3.10+ | Yes | Yes |
-| GPU (NVENC/AMF/QSV) | Recommended | No |
-| Chromium browser 94+ | Yes | Recommended |
-| WSL (voice REC) | Optional | Optional |
-| openssl (TLS cert) | Yes | Yes |
+| 条件 | 完整版 | 纯遥控 |
+|------|:---:|:---:|
+| Windows 10+ | 需要 | 需要 |
+| Python 3.10+ | 需要 | 需要 |
+| GPU（NVENC/AMF/QSV） | 推荐 | 不需要 |
+| Chromium 浏览器 94+ | 需要 | 推荐 |
+| WSL（语音识别） | 可选 | 可选 |
+| openssl（TLS 证书） | 需要 | 需要 |
 
 ---
 
-## 2. Setup — Full mode / 完整版安装
+## 2. 完整版安装
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 
-# Generate TLS certificate / 生成 TLS 证书
+# 生成自签名证书
 openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 3650 -nodes -subj "/CN=localhost"
 
 copy config.example.json config.json
 .venv\Scripts\python server.py
 ```
 
-> **Firewall / 防火墙**: Windows may block inbound connections. Run the following to allow LAN access / Windows 可能阻止入站连接，请执行以下命令放行局域网访问：
+> **防火墙**：Windows 可能阻止入站连接，执行以下命令放行局域网访问：
 > ```powershell
 > New-NetFirewallRule -Name "DeskBeam" -DisplayName "DeskBeam" -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 8769
 > ```
 
-Open `https://<lan-ip>:8769` in Chrome/Edge. Accept the certificate warning. | 浏览器打开上述地址，接受证书警告。
+Chrome/Edge 打开 `https://<局域网IP>:8769`，接受证书警告即可。
 
-> **No-SSL mode / 无证书模式**: If `cert.pem` and `key.pem` are missing, DeskBeam falls back to plain HTTP (no microphone in browser). Generate certs as shown above or skip for LAN-only use. | 缺少证书文件时自动降级为明文 HTTP（浏览器无法使用麦克风），按上方命令生成证书或局域网内直接使用。
+> **无证书模式**：若 `cert.pem` 和 `key.pem` 不存在，自动降级为 HTTP（浏览器无法使用麦克风）。
 
 ---
 
-## 3. Setup — Remote-only / 纯遥控安装
+## 3. 纯遥控安装
 
-### Option A: Python
-
-~2 MB install | 约 2 MB 安装：
+### 方式 A：Python 源码
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\pip install -r requirements-remote.txt
 openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 3650 -nodes -subj "/CN=localhost"
 copy config.example.json config.json
-.venv\Scripts\python server.py
+.venv\Scripts\python server_remote.py
 ```
 
-### Option B: Standalone exe / 单文件可执行程序
+### 方式 B：单文件 exe
 
-Compile into a single `DeskBeamRemote.exe` — no Python installation needed on the target machine. | 编译为单文件，目标机器无需安装 Python。
+编译为单个 `DeskBeamRemote.exe`，目标机器无需安装 Python：
 
 ```powershell
 build_remote.bat
 ```
 
-Deploy with these files / 部署只需这 4 个文件：
+部署只需 4 个文件：
 
 ```
-├── DeskBeamRemote.exe    # double-click to start / 双击启动
-├── config.json            # edit before deploying / 部署前修改
-├── cert.pem               # generate with openssl
+├── DeskBeamRemote.exe     # 双击启动
+├── config.json             # 部署前修改
+├── cert.pem                # 用 openssl 生成
 └── key.pem
 ```
 
-Process runs hidden (no terminal). Stop via: | 后台运行无窗口，退出方式：
-- `stop.bat` (double-click / 双击)
-- Task Manager → end `DeskBeamRemote.exe` | 任务管理器结束进程
-- Browser: click the status text (`LIVE`/`RETRY`/`CONNECTING`) → confirm to close the app | 浏览器中点击状态文字 → 确认后关闭程序
+后台运行无窗口。退出方式：
+- `stop.bat`（双击）
+- 任务管理器结束 `DeskBeamRemote.exe`
+- 浏览器点击状态文字（`LIVE`）→ 选择 `Shutdown` 关闭程序
 
 ---
 
-### Logout / 退出登录
+## 4. 登录 / 登出
 
-Click the status text (`LIVE` / `RETRY` / `CONNECTING`) in the top-left corner, then confirm to log out. Session cookie is cleared immediately. | 点击左上角状态文字，确认后登出，Session cookie 立即清除。
+点击左上角状态文字（`LIVE` / `RETRY` / `CONNECTING`）弹出操作面板：
+
+- **Logout**：退出登录，清除 cookie，跳转登录页
+- **Shutdown**：关闭 DeskBeam 进程
+- **Cancel**：取消
 
 ---
 
-## 4. Run as background service / 后台运行
+## 5. 后台运行
 
 ```powershell
-start.vbs      # hidden + UAC elevation / 隐藏窗口+提权
-start.bat      # visible CMD for debugging / 调试用
-stop.bat       # kill server / 停止服务
+start.vbs      # 隐藏窗口 + 提权启动
+start.bat      # 调试用（有 CMD 窗口）
+stop.bat       # 停止服务
 ```
 
 ---
 
-## 5. Configuration / 配置
+## 6. 配置
 
 ```json
 {
@@ -124,111 +126,118 @@ stop.bat       # kill server / 停止服务
 }
 ```
 
-| Key | Type | Default | Description / 说明 |
-|-----|------|---------|---------------------|
-| `port` | int | 8769 | HTTPS/WSS port |
-| `token` | str | `""` | Auth token; empty = no auth / 空则无需认证 |
-| `max_fps` | int | 3 | Frame rate (ignored in remote-only) / 帧率 |
-| `streaming` | bool | true | Enable screen streaming / 启用桌面串流 |
-| `gop` | int | 1 | Keyframe interval; 1 = all I-frames (LAN), 30+ = P-frames (cloud) / 关键帧间隔 |
-| `wsl_asr_script` | str | `~/scripts/asr.py` | ASR script path in WSL / WSL 内 ASR 脚本路径 |
-| `asr_health_url` | str | `http://127.0.0.1:8082/healthz` | ASR health check URL / ASR 健康检查地址 |
+| 键 | 类型 | 默认值 | 说明 |
+|---|------|-------|------|
+| `port` | int | 8769 | HTTPS/WSS 端口 |
+| `token` | str | `""` | 认证口令，空则跳过认证 |
+| `max_fps` | int | 3 | 最大帧率 |
+| `streaming` | bool | true | 启用桌面串流 |
+| `gop` | int | 1 | 关键帧间隔 |
+| `wsl_asr_script` | str | `~/scripts/asr.py` | WSL 内 ASR 脚本路径 |
+| `asr_health_url` | str | `http://127.0.0.1:8082/healthz` | ASR 健康检查地址 |
+| `asr_cooldown` | int | 10 | ASR 重试间隔（秒） |
 
 ---
 
-## 6. Browser compatibility / 浏览器兼容性
+## 7. 浏览器兼容性
 
-| Browser | Remote | Screen |
-|---------|:------:|:------:|
-| Chrome / Edge 94+ | Yes | Yes |
-| Opera / Brave | Yes | Yes |
-| Firefox | Yes | No |
-| Safari | Yes | No |
-| iOS browsers | Yes | No |
-
----
-
-## 7. GOP tuning / GOP 调优
-
-Bandwidth at 2560×1440, CQ=26, static desktop / 静态桌面带宽（2560×1440, CQ=26）：
-
-| `gop` | Keyframe interval | Bandwidth | Use case / 场景 |
-|-------|-------------------|-----------|-----------------|
-| 1 | every frame | ~23 Mbps | LAN, zero latency |
-| 30 | every 1s | ~5 Mbps | Cloud 30M server |
-| 60 | every 2s | ~3 Mbps | Cloud 3M server |
-
-P-frames drop to ~200 bytes on static content. | 静态内容 P 帧仅 ~200 字节。
+| 浏览器 | 远程遥控 | 屏幕串流 |
+|--------|:---:|:---:|
+| Chrome / Edge 94+ | ✅ | ✅ |
+| Opera / Brave | ✅ | ✅ |
+| Firefox | ✅ | ❌ |
+| Safari | ✅ | ❌ |
+| iOS 浏览器 | ✅ | ❌ |
 
 ---
 
-## 8. Architecture / 架构
+## 8. GOP 调优
+
+静态桌面带宽参考（2560×1440, CQ=26）：
+
+| `gop` | 关键帧间隔 | 带宽 | 适用场景 |
+|-------|----------|------|---------|
+| 1 | 每帧 | ~23 Mbps | 局域网零延迟 |
+| 15 | 每 0.5s（30fps） | ~6 Mbps | 云服务器 15M |
+| 30 | 每 1s（30fps） | ~5 Mbps | 云服务器 30M |
+| 60 | 每 2s（30fps） | ~3 Mbps | 小带宽 3M |
+
+静态内容 P 帧仅 ~200 字节。
+
+---
+
+## 9. 架构
 
 ```
-Browser / 浏览器                           Python server / 服务端
+浏览器                                      Python 服务端
 ┌──────────────────────┐               ┌─────────────────────────┐
-│ canvas + VideoDecoder│◄── WSS (H.264)│ mss → screen capture   │
-│ touchpad / mouse     │──► WSS JSON   │ numpy → cursor overlay  │
-│ keyboard shortcuts   │   (control)   │ PyAV → H.264 encode    │
-│ text input / voice   │──► WSS (WAV)  │   NVENC/QSV/AMF/x264   │
+│ canvas + VideoDecoder │◄── WSS (H.264)│ mss → 屏幕捕获          │
+│ 触控板 / 鼠标        │──► WSS JSON   │ numpy → 光标叠加        │
+│ 快捷键               │   (控制)      │ PyAV → H.264 编码       │
+│ 文字输入 / 语音      │──► WSS (WAV)  │   NVENC/QSV/AMF/x264   │
 └──────────────────────┘               │ keyboard / ctypes       │
-                                       │ WSL → ASR (voice)      │
+                                       │ WSL → ASR（语音识别）   │
                                        └─────────────────────────┘
 ```
 
 ---
 
-## 9. Security / 安全
+## 10. 安全
 
-| Layer | Mechanism |
-|-------|-----------|
-| Transport | TLS 1.2+ WSS encryption (or SSH tunnel for remote) |
-| Auth | Token via cookie (HttpOnly + SameSite=Strict), brute force: 5 fails → 24h block |
-| Session | 24h expiry stored server-side |
-| Path traversal | `relative_to()` sandbox |
-| Logging | `audit.log` records login/logout/WS events |
-| Secrets | `config.json`, `cert.pem`, `key.pem`, `*.ps1`, `audit.log` git-ignored |
+| 层级 | 机制 |
+|------|------|
+| 传输 | TLS 1.2+ WSS 加密 |
+| 认证 | Cookie 口令（HttpOnly + SameSite=Strict），5 次失败封锁 24 小时 |
+| 会话 | 服务端 24 小时过期 |
+| 路径遍历 | `relative_to()` 沙箱 |
+| 审计 | `audit.log` 记录登录/登出/连接事件 |
+| 密钥 | `config.json`、`cert.pem`、`key.pem`、`*.ps1`、`audit.log` 已 gitignore |
 
-### Self-signed cert / 自签名证书
+### 自签名证书
 
-Encrypts traffic but browser can't verify identity. First visit shows a certificate warning — this is expected. | 加密流量但浏览器无法验证身份，首次访问会提示证书警告，属正常现象。
+加密流量但浏览器无法验证身份，首次访问会提示证书警告——属正常现象。
 
-### ARP spoofing / ARP 欺骗风险
+### ARP 欺骗风险
 
-On LAN, an attacker can redirect traffic + present a fake cert → full MITM (desktop contents, keystrokes, voice captured). | 局域网内攻击者可重定向流量+伪造证书，实现中间人攻击。
+局域网内的攻击者可重定向流量并伪造证书，实现中间人攻击。
 
-**Mitigations / 防御措施：**
-
-1. **TOFU** — compare cert fingerprint after generation: `openssl x509 -in cert.pem -noout -sha256 -fingerprint`
-2. **CA-signed cert** — use Let's Encrypt with a real domain
-3. **Static ARP** — `arp -s <gateway-ip> <gateway-mac>`
-4. **Don't expose on untrusted networks** / 不在不受信任的网络暴露
+**防御措施：**
+1. 生成证书后比对指纹：`openssl x509 -in cert.pem -noout -sha256 -fingerprint`
+2. 使用真实域名 + Let's Encrypt 签发证书
+3. 静态 ARP 绑定：`arp -s <网关IP> <网关MAC>`
+4. 不在不受信任的网络暴露
 
 ---
 
-## 10. Files / 文件结构
+## 11. 文件结构
 
 ```
-├── server.py              # Main server / 主服务
-├── encoder.py             # H.264 encoder (PyAV)
-├── requirements.txt       # Full mode deps / 完整版依赖
+├── server.py              # 主服务（完整版）
+├── server_remote.py       # 纯遥控版（用于构建 exe）
+├── encoder.py             # H.264 编码器（PyAV）
+├── requirements.txt       # 完整版依赖
 ├── requirements-remote.txt
-├── build_remote.bat       # PyInstaller build / 编译脚本
+├── build_remote.bat       # PyInstaller 构建脚本
 ├── config.example.json
-├── start.vbs / start.bat  # Launchers / 启动脚本
-├── stop.bat               # Kill server / 停止脚本
-├── icon.ico / icon.png    # App icon / 图标
+├── start.vbs / start.bat  # 启动脚本
+├── stop.bat               # 停止脚本
+├── icon.ico / icon.png    # 图标
 ├── .gitignore
 ├── LICENSE
+├── docs/                  # 截图
 └── web/
-    ├── index.html         # Browser UI / 前端界面
-    └── login.html         # Auth page / 登录页
+    ├── index.html         # 前端界面
+    └── login.html         # 登录页
 ```
 
-## 11. Disclaimer / 免责声明
+---
 
-DeskBeam provides remote desktop access. Misconfiguration (weak token, untrusted network, leaked secrets) may lead to unauthorized access, data loss, or other damages. The authors assume no liability for any loss or damage arising from the use of this software. Use at your own risk. | 本软件提供远程桌面功能。配置不当（弱口令、不受信任的网络、密钥泄露）可能导致未授权访问、数据泄露或其他损失。作者不承担任何责任，请自行评估风险。
+## 12. 免责声明
 
-## 12. License / 许可证
+本软件提供远程桌面功能。配置不当（弱口令、不受信任的网络、密钥泄露）可能导致未授权访问、数据泄露或其他损失。作者不承担任何责任，使用前请自行评估风险。
 
-MIT — see [LICENSE](LICENSE)
+---
+
+## 13. 许可证
+
+MIT — 详见 [LICENSE](LICENSE)

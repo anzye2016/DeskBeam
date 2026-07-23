@@ -138,12 +138,13 @@ stop.bat       # kill server / 停止服务
 
 ## 6. Browser compatibility / 浏览器兼容性
 
-| Browser | Supported |
-|---------|-----------|
-| Chrome / Edge 94+ | Yes |
-| Opera / Brave | Yes |
-| Firefox / Safari | No (missing VideoDecoder API) |
-| iOS browsers | No |
+| Browser | Remote | Screen |
+|---------|:------:|:------:|
+| Chrome / Edge 94+ | Yes | Yes |
+| Opera / Brave | Yes | Yes |
+| Firefox | Yes | No |
+| Safari | Yes | No |
+| iOS browsers | Yes | No |
 
 ---
 

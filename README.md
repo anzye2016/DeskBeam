@@ -83,7 +83,16 @@ Deploy with these files / 部署只需这 4 个文件：
 └── key.pem
 ```
 
-Process runs hidden (no terminal). Stop via `stop.bat` or Task Manager → end `DeskBeamRemote`. | 后台运行无窗口，通过 stop.bat 或任务管理器结束进程。
+Process runs hidden (no terminal). Stop via: | 后台运行无窗口，退出方式：
+- `stop.bat` (double-click / 双击)
+- Task Manager → end `DeskBeamRemote.exe` | 任务管理器结束进程
+- Browser: click the status text (`LIVE`/`RETRY`/`CONNECTING`) → confirm to close the app | 浏览器中点击状态文字 → 确认后关闭程序
+
+---
+
+### Logout / 退出登录
+
+Click the status text (`LIVE` / `RETRY` / `CONNECTING`) in the top-left corner, then confirm to log out. Session cookie is cleared immediately. | 点击左上角状态文字，确认后登出，Session cookie 立即清除。
 
 ---
 

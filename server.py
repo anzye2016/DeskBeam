@@ -425,6 +425,8 @@ async def http_handler(connection, request):
 
     if path == "/shutdown":
         _audit("SHUTDOWN", connection.remote_address[0] if connection.remote_address else "")
+        try: PID_FILE.unlink(missing_ok=True)
+        except Exception: pass
         _ = threading.Thread(target=lambda: os._exit(0), daemon=True)
         _.start()
         return Response(200, "OK", Headers({"Content-Type": "text/plain"}), b"Server shutting down...")
@@ -588,7 +590,8 @@ async def main():
         print("  The web/ directory contains the browser UI files and must be present.")
         sys.exit(1)
 
-    server = await websockets.serve(
+    global _server
+    _server = await websockets.serve(
         ws_handler,
         HOST,
         PORT,
@@ -598,7 +601,7 @@ async def main():
         ping_timeout=10,
     )
     print(f"Ready.  {proto}://{LAN_IP}:{PORT}")
-    await server.wait_closed()
+    await _server.wait_closed()
 
 
 if __name__ == "__main__":

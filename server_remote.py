@@ -359,7 +359,8 @@ async def http_handler(connection, request):
 
     if path == "/shutdown":
         _audit("SHUTDOWN", connection.remote_address[0] if connection.remote_address else "")
-        threading.Thread(target=lambda: os._exit(0), daemon=True).start()
+        _ = threading.Thread(target=lambda: os._exit(0), daemon=True)
+        _.start()
         return Response(200, "OK", Headers({"Content-Type": "text/plain"}), b"Server shutting down...")
 
     if AUTH_TOKEN and not _check_auth(request):

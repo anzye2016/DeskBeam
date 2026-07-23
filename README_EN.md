@@ -166,7 +166,24 @@ P-frames drop to ~200 bytes on static content.
 
 ---
 
-## 9. Architecture
+## 9. Voice Recognition (Optional)
+
+Voice recognition requires WSL (Windows Subsystem for Linux) and a running ASR model server (default port 8082). The project's `asr.py` script forwards recorded audio to the model.
+
+### Quick Start
+
+```bash
+# Inside WSL, copy the script
+cp asr.py ~/scripts/
+# Deploy an ASR model server on 127.0.0.1:8082
+# e.g., Qwen3-ASR-0.6B
+```
+
+When recording finishes, DeskBeam sends the WAV audio to the ASR server, receives the transcription, and types it into the focused window.
+
+---
+
+## 10. Architecture
 
 ```
 Browser                                     Python server
@@ -182,7 +199,7 @@ Browser                                     Python server
 
 ---
 
-## 10. Security
+## 11. Security
 
 | Layer | Mechanism |
 |-------|-----------|
@@ -209,11 +226,12 @@ On LAN, an attacker can redirect traffic + present a fake cert → full MITM (de
 
 ---
 
-## 11. File Structure
+## 12. File Structure
 
 ```
 ├── server.py              # Main server (full mode)
 ├── server_remote.py       # Remote-only (for exe builds)
+├── asr.py                 # Voice-to-text script (WSL, needs ASR server)
 ├── encoder.py             # H.264 encoder (PyAV)
 ├── requirements.txt       # Full mode deps
 ├── requirements-remote.txt
@@ -232,7 +250,7 @@ On LAN, an attacker can redirect traffic + present a fake cert → full MITM (de
 
 ---
 
-## 12. Disclaimer
+## 13. Disclaimer
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. Misconfiguration (weak token, untrusted network, leaked secrets) may lead to unauthorized access, data loss, or other damages. The authors assume no liability. Use at your own risk.
 
@@ -240,6 +258,6 @@ This software provides full access to the controlled computer. Only use it on ma
 
 ---
 
-## 13. License
+## 14. License
 
 MIT — see [LICENSE](LICENSE)

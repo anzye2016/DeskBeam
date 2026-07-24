@@ -357,6 +357,8 @@ def do_mouse(cmd, dx=0, dy=0):
         ctypes.windll.user32.SetCursorPos(dx, dy)
     elif cmd == "click":
         _mouse(0x0002); _mouse(0x0004)
+    elif cmd == "double_click":
+        _mouse(0x0002); _mouse(0x0004); _mouse(0x0002); _mouse(0x0004)
     elif cmd == "down":
         _mouse(0x0002)
     elif cmd == "up":
@@ -464,6 +466,10 @@ async def ws_handler(websocket):
                     continue
 
                 cmd = msg.get("type", "")
+
+                if cmd == "mouse_double_click":
+                    await loop.run_in_executor(executor, do_mouse, "double_click")
+                    continue
 
                 if cmd == "mouse_click_at":
                     x, y = msg.get("x", 0), msg.get("y", 0)

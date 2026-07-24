@@ -103,7 +103,7 @@ document.getElementById('zi').addEventListener('click',function(){zs(_zi+1);});d
 var P=60;document.getElementById('pl').addEventListener('click',function(){sw.scrollLeft=Math.max(0,sw.scrollLeft-P);});document.getElementById('pr').addEventListener('click',function(){sw.scrollLeft=Math.min(sw.scrollWidth-sw.clientWidth,sw.scrollLeft+P);});document.getElementById('pu').addEventListener('click',function(){sw.scrollTop=Math.max(0,sw.scrollTop-P);});document.getElementById('pd').addEventListener('click',function(){sw.scrollTop=Math.min(sw.scrollHeight-sw.clientHeight,sw.scrollTop+P);});
 function cn(){var p=location.protocol==='https:'?'wss':'ws';ws=new WebSocket(p+'://'+location.host+'/ws');ws.binaryType='arraybuffer';ws.onopen=function(){st.textContent='LIVE';if(_so)sm(true);};ws.onclose=function(){st.textContent='RETRY';setTimeout(cn,2000);};ws.onerror=function(){st.textContent='ERROR';};ws.onmessage=function(e){if(typeof e.data==='string'){try{var m=JSON.parse(e.data);if(m.type==='hello'){if(!m.streaming){document.getElementById('mb').style.display='none';}}else if(m.type==='screen_config'){if(typeof VideoDecoder==='undefined')return;_rw=m.width;_rh=m.height;if(decoder){try{decoder.close();}catch(ex){}decoder=null;}var vd=document.getElementById('vd');if(vd)vd.style.display='none';cv.style.display='';var ctx=cv.getContext('2d');decoder=new VideoDecoder({output:function(f){cv.width=f.displayWidth;cv.height=f.displayHeight;ctx.drawImage(f,0,0);f.close();var n=performance.now();_fts.push(n);_fts.length>10&&_fts.shift();var fps=_fts.length<3?0:Math.round((_fts.length-1)*1000/(_fts[_fts.length-1]-_fts[0]));st.textContent='LIVE '+String(fps).padStart(3,'0')+'fps';},error:function(e){console.error('Decoder:',e);}});decoder.configure({codec:m.codec});_fts=[];}else if(m.type==='webrtc_offer'){var pc=new RTCPeerConnection({iceServers:[]});_pc=pc;_rtcDc=null;pc.ontrack=function(e){var vd=document.getElementById('vd');cv.style.display='none';vd.style.display='block';vd.srcObject=e.streams[0];};pc.ondatachannel=function(e){_rtcDc=e.channel;};pc.setRemoteDescription(new RTCSessionDescription({sdp:m.sdp,type:m.sdp_type})).then(function(){return pc.createAnswer()}).then(function(a){pc.setLocalDescription(a);ws.send(JSON.stringify({type:'webrtc_answer',sdp:a.sdp,sdp_type:a.type}));});pc.onicecandidate=function(e){if(e.candidate&&ws)ws.send(JSON.stringify({type:'webrtc_ice',candidate:{candidate:e.candidate.candidate,sdpMid:e.candidate.sdpMid||'0',sdpMLineIndex:e.candidate.sdpMLineIndex||0}}));};}else if(m.type==='webrtc_ice'){if(_pc){try{_pc.addIceCandidate(new RTCIceCandidate(m.candidate))}catch(ex){}}}}catch(_){}}else if(e.data instanceof ArrayBuffer){var v=new Uint8Array(e.data);if(v.length<2)return;var isKey=v[0]===1,h264=v.slice(1);if(decoder&&decoder.state==='configured'){var c=new EncodedVideoChunk({type:isKey?'key':'delta',timestamp:_ts,data:h264});_ts+=33333;try{decoder.decode(c);}catch(_){}}}};}cn();
 function _isLan(){var h=location.hostname;return h==='localhost'||h==='127.0.0.1'||h==='::1'||/^10\./.test(h)||/^172\.(1[6-9]|2\d|3[01])\./.test(h)||/^192\.168\./.test(h);}
-var _mt=null,_mdx=0,_mdy=0,_lan=_isLan(),_tt=null;
+var _mt=null,_mdx=0,_mdy=0,_lan=_isLan(),_tt=null,_lt=0;
 ta.addEventListener('touchstart',function(e){
   if(_tt){clearTimeout(_tt);_tt=null;}
   _pinchEnded=false;
@@ -138,12 +138,14 @@ ta.addEventListener('touchend',function(e){
   else if(!_mv){
     _tt=setTimeout(function(){
       _tt=null;
+      if(Date.now()-_lt<500){sendCmd({type:'mouse_double_click'});_lt=0;return;}
       if(_rw&&_rh&&cv.style.display!=='none'&&cv.getBoundingClientRect){
         var t=e.changedTouches[0],rect=cv.getBoundingClientRect();
         if(t.clientX>=rect.left&&t.clientX<=rect.right&&t.clientY>=rect.top&&t.clientY<=rect.bottom)
           sendCmd({type:'mouse_click_at',x:Math.round((t.clientX-rect.left)/rect.width*cv.width),y:Math.round((t.clientY-rect.top)/rect.height*cv.height)});
         else sendCmd({type:'mouse_click'});
       }else sendCmd({type:'mouse_click'});
+      _lt=Date.now();
     },20);
   }
 });

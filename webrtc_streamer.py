@@ -1,5 +1,5 @@
-"""WebRTC screen streaming for Firefox/Safari fallback."""
-import asyncio, fractions, time
+"""WebRTC screen streaming with data channel for control commands."""
+import asyncio, fractions, json, time
 from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription
 import av
 
@@ -31,9 +31,10 @@ class ScreenTrack(MediaStreamTrack):
 
 
 class WebRTCSession:
-    def __init__(self, ws_send):
+    def __init__(self, ws_send, data_handler=None):
         self._pc = RTCPeerConnection()
         self._ws_send = ws_send
+        self._data_handler = data_handler
         self._track = None
         self._done = asyncio.Event()
         self._ice_queue = []
@@ -54,6 +55,16 @@ class WebRTCSession:
                                       "sdpMid": candidate.sdpMid or "0",
                                       "sdpMLineIndex": candidate.sdpMLineIndex or 0}
                     }))
+                except Exception:
+                    pass
+
+        self._dc = self._pc.createDataChannel("deskbeam")
+
+        @self._dc.on("message")
+        async def on_dc_message(msg):
+            if self._data_handler:
+                try:
+                    await self._data_handler(msg)
                 except Exception:
                     pass
 

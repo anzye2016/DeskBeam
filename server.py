@@ -536,6 +536,33 @@ async def ws_handler(websocket):
     encoder = [None]
     _webrtc = None
 
+    async def handle_command(msg):
+        cmd = msg.get("type", "")
+        if cmd == "type_text":
+            text = msg.get("text", "")
+            if text:
+                print(f"  type: {text}")
+                await loop.run_in_executor(executor, keyboard.write, text)
+        elif cmd in _KEY_MAP:
+            await loop.run_in_executor(executor, do_combo, cmd)
+        elif cmd == "mouse_move":
+            dx, dy = msg.get("dx", 0), msg.get("dy", 0)
+            await loop.run_in_executor(executor, do_mouse, "move", dx, dy)
+        elif cmd == "mouse_click":
+            await loop.run_in_executor(executor, do_mouse, "click")
+        elif cmd == "mouse_down":
+            await loop.run_in_executor(executor, do_mouse, "down")
+        elif cmd == "mouse_up":
+            await loop.run_in_executor(executor, do_mouse, "up")
+        elif cmd == "mouse_right":
+            await loop.run_in_executor(executor, do_mouse, "right")
+        elif cmd == "mouse_middle":
+            await loop.run_in_executor(executor, do_mouse, "middle")
+        elif cmd == "scroll_up":
+            await loop.run_in_executor(executor, do_mouse, "scroll", 0, 1)
+        elif cmd == "scroll_down":
+            await loop.run_in_executor(executor, do_mouse, "scroll", 0, -1)
+
     async def screen_sender():
         """Capture, encode H.264, and send."""
         while running:
@@ -599,31 +626,7 @@ async def ws_handler(websocket):
 
                 cmd = msg.get("type", "")
 
-                if cmd == "type_text":
-                    text = msg.get("text", "")
-                    if text:
-                        print(f"  type: {text}")
-                        await loop.run_in_executor(executor, keyboard.write, text)
-                elif cmd in _KEY_MAP:
-                    await loop.run_in_executor(executor, do_combo, cmd)
-                elif cmd == "mouse_move":
-                    dx, dy = msg.get("dx", 0), msg.get("dy", 0)
-                    await loop.run_in_executor(executor, do_mouse, "move", dx, dy)
-                elif cmd == "mouse_click":
-                    await loop.run_in_executor(executor, do_mouse, "click")
-                elif cmd == "mouse_down":
-                    await loop.run_in_executor(executor, do_mouse, "down")
-                elif cmd == "mouse_up":
-                    await loop.run_in_executor(executor, do_mouse, "up")
-                elif cmd == "mouse_right":
-                    await loop.run_in_executor(executor, do_mouse, "right")
-                elif cmd == "mouse_middle":
-                    await loop.run_in_executor(executor, do_mouse, "middle")
-                elif cmd == "scroll_up":
-                    await loop.run_in_executor(executor, do_mouse, "scroll", 0, 1)
-                elif cmd == "scroll_down":
-                    await loop.run_in_executor(executor, do_mouse, "scroll", 0, -1)
-                elif cmd == "set_mode":
+                if cmd == "set_mode":
                     if not msg.get("screen", False):
                         if _webrtc:
                             await _webrtc.close()
@@ -635,7 +638,12 @@ async def ws_handler(websocket):
                                 await websocket.send(data)
                             except Exception:
                                 pass
-                        s = WebRTCSession(_webrtc_send)
+                        async def _dc_handler(msg_str):
+                            try:
+                                await handle_command(json.loads(msg_str))
+                            except Exception:
+                                pass
+                        s = WebRTCSession(_webrtc_send, _dc_handler)
                         s.add_track(capture_screen_raw, fps)
                         offer = await s.create_offer()
                         _webrtc = s
@@ -650,6 +658,8 @@ async def ws_handler(websocket):
                 elif cmd == "webrtc_ice":
                     if _webrtc:
                         await _webrtc.add_ice(msg["candidate"])
+                else:
+                    await handle_command(msg)
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:

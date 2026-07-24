@@ -536,6 +536,13 @@ async def ws_handler(websocket):
     encoder = [None]
     _webrtc = None
 
+    async def _webrtc_timeout():
+        await asyncio.sleep(5)
+        if _webrtc and _webrtc._pc.iceConnectionState not in ("connected", "completed"):
+            await _webrtc.close()
+            _webrtc = None
+            print("  WebRTC timeout, falling back to WebSocket")
+
     async def handle_command(msg):
         cmd = msg.get("type", "")
         if cmd == "type_text":
@@ -652,6 +659,7 @@ async def ws_handler(websocket):
                             "sdp": offer.sdp,
                             "sdp_type": offer.type,
                         }))
+                        asyncio.create_task(_webrtc_timeout())
                 elif cmd == "webrtc_answer":
                     if _webrtc:
                         await _webrtc.handle_answer(msg["sdp"], msg.get("sdp_type", "answer"))

@@ -279,8 +279,6 @@ def capture_screen_raw():
 # ── Voice ASR ──
 WSL_ASR = _cfg["wsl_asr_script"]
 ASR_URL = _cfg["asr_health_url"]
-_elevated_sock = None
-
 _asr_ready = False
 _asr_last_check = 0
 _asr_lock = threading.Lock()
@@ -437,33 +435,7 @@ def _mouse(flags, dx=0, dy=0, data=0):
         traceback.print_exc()
 
 
-def _elevated_send(msg):
-    global _elevated_sock
-    if _elevated_sock:
-        try:
-            _elevated_sock.sendall((json.dumps(msg) + "\n").encode())
-            return True
-        except Exception:
-            try: _elevated_sock.close()
-            except: pass
-            _elevated_sock = None
-    return False
-
-def _elevated_init():
-    global _elevated_sock
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(2)
-        s.connect(("127.0.0.1", 18771))
-        s.settimeout(None)
-        _elevated_sock = s
-        print("Elevated input connected")
-    except Exception:
-        _elevated_sock = None
-        print("Elevated input not available (lock screen/UAC not supported)")
-
 def do_mouse(cmd, dx=0, dy=0):
-    _elevated_send({"type":f"mouse_{cmd}","dx":dx,"dy":dy}) if _elevated_sock else None
     if cmd == "move":
         _mouse(0x0001, dx, dy)
     elif cmd == "move_to":
@@ -584,10 +556,8 @@ async def ws_handler(websocket):
             text = msg.get("text", "")
             if text:
                 print(f"  type: {text}")
-                if _elevated_sock: _elevated_send({"type":"type_text","text":text})
                 await loop.run_in_executor(executor, keyboard.write, text)
         elif cmd in _KEY_MAP:
-            if _elevated_sock: _elevated_send({"type":cmd})
             await loop.run_in_executor(executor, do_combo, cmd)
         elif cmd == "mouse_move":
             dx, dy = msg.get("dx", 0), msg.get("dy", 0)
@@ -743,7 +713,6 @@ async def ws_handler(websocket):
 
 # ── Main ──
 async def main():
-    _elevated_init()
     if not _STREAMING:
         print("Streaming unavailable — running remote-only mode.")
         print("  Install for streaming: pip install av numpy mss")

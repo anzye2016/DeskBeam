@@ -3,7 +3,6 @@ __pycache__/
 *.pyc
 *.exe
 **/recording.wav
-elevated.pid
 **/stderr.txt
 **/server.pid
 **/server.log
@@ -18,4 +17,5 @@ temp/
 *.ps1
 *.bak
 audit.log
-快捷命令.txt
+tunnel-hd-reminder.py
+tunnel-reminder.py

@@ -13,8 +13,8 @@ if exist server.pid (
     del server.pid >nul 2>&1
 )
 
-rem Kill any process holding our port, excluding elevated_input
-powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; $elevatedPid=try{Get-Content elevated.pid -ErrorAction SilentlyContinue}catch{$null}; Get-NetTCPConnection -LocalPort 8769 -ErrorAction SilentlyContinue | Where-Object { $_.OwningProcess -ne $elevatedPid } | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }"
+rem Kill any process holding our port (catches orphaned/old instances)
+powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; Get-NetTCPConnection -LocalPort 8769 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }"
 
 rem Kill compiled exe
 taskkill /IM DeskBeamRemote.exe /F >nul 2>&1

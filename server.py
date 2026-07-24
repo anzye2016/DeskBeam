@@ -4,6 +4,7 @@ import asyncio
 import base64
 import ctypes
 import ctypes.wintypes
+import io
 import json
 import os
 import socket
@@ -15,6 +16,7 @@ import threading
 import time
 import traceback
 import urllib.request
+import wave
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -535,6 +537,7 @@ async def ws_handler(websocket):
     streaming = [False]
     encoder = [None]
     _webrtc = None
+    voice_pcm = None
 
     async def _webrtc_timeout():
         await asyncio.sleep(5)
@@ -609,20 +612,10 @@ async def ws_handler(websocket):
     try:
         async for message in websocket:
             if isinstance(message, bytes):
-                wav_path = TEMP_DIR / f"rec_{os.getpid()}_{time.time_ns()}.wav"
-                try:
-                    wav_path.write_bytes(message)
-                except OSError:
-                    continue
-                async def _transcribe_async(path):
-                    t = await loop.run_in_executor(executor, _transcribe, path)
-                    try:
-                        path.unlink(missing_ok=True)
-                    except Exception:
-                        pass
-                    if t:
-                        await loop.run_in_executor(executor, keyboard.write, t)
-                asyncio.create_task(_transcribe_async(wav_path))
+                if len(message) > 44:
+                    if voice_pcm is None:
+                        voice_pcm = io.BytesIO()
+                    voice_pcm.write(message[44:])
                 continue
 
             if isinstance(message, str):
@@ -666,6 +659,28 @@ async def ws_handler(websocket):
                 elif cmd == "webrtc_ice":
                     if _webrtc:
                         await _webrtc.add_ice(msg["candidate"])
+                elif cmd == "voice_end":
+                    if voice_pcm:
+                        pcm = voice_pcm.getvalue()
+                        voice_pcm = None
+                        if pcm:
+                            wav_path = SCRIPT_DIR / "recording.wav"
+                            try:
+                                with wave.open(str(wav_path), "wb") as w:
+                                    w.setnchannels(1)
+                                    w.setsampwidth(2)
+                                    w.setframerate(16000)
+                                    w.writeframes(pcm)
+                            except Exception:
+                                continue
+                            async def _transcribe_full(path):
+                                t = await loop.run_in_executor(executor, _transcribe, path)
+                                if t:
+                                    await loop.run_in_executor(executor, keyboard.write, t)
+                                else:
+                                    print(f"  ASR failed, audio saved: {path}")
+                            asyncio.create_task(_transcribe_full(wav_path))
+                    continue
                 else:
                     await handle_command(msg)
     except websockets.exceptions.ConnectionClosed:

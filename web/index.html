@@ -69,7 +69,7 @@ textarea:focus{border-color:var(--blue);}
 var K=[['Ctrl+C','ctrl_c'],['Enter','enter'],['Esc','esc'],['Backspace','backspace'],['Ctrl+V','ctrl_v'],['Ctrl+A','ctrl_a'],['Ctrl+Z','ctrl_z'],['Ctrl+X','ctrl_x'],['Ctrl+S','ctrl_s'],['Tab','tab'],['Alt+Tab','alt_tab'],['Win','win'],['F5','f5'],['Ctrl+F5','ctrl_f5'],['Ctrl+J','ctrl_j'],['Shift+Enter','shift_enter'],['↑','up'],['↓','down'],['←','left'],['→','right']];
 var ks=document.getElementById('ks');K.forEach(function(d){var b=document.createElement('button');b.className='k';b.textContent=d[0];b.dataset.c=d[1];ks.appendChild(b);});
 var cv=document.getElementById('cv'),sw=document.getElementById('sw'),ta=document.getElementById('ta'),ti=document.getElementById('ti');
-var st=document.getElementById('st');let ws=null,_so=false,_dm=false;var _px=0,_py=0,_mv=false,_ts=0,_fts=[];var decoder=null;var _pc=null,_rtcDc=null;var _rw=0,_rh=0,_pinching=false,_ps=0,_pcx=0,_pcy=0,_pzc=0;
+var st=document.getElementById('st');let ws=null,_so=false,_dm=false;var _px=0,_py=0,_mv=false,_ts=0,_fts=[];var decoder=null;var _pc=null,_rtcDc=null;var _rw=0,_rh=0,_pinching=false,_pinchEnded=false,_ps=0,_pcx=0,_pcy=0,_pzc=0;
 var mb=document.getElementById('mb');
 function sm(on){
   if(on&&typeof VideoDecoder==='undefined'){
@@ -105,10 +105,11 @@ function cn(){var p=location.protocol==='https:'?'wss':'ws';ws=new WebSocket(p+'
 function _isLan(){var h=location.hostname;return h==='localhost'||h==='127.0.0.1'||h==='::1'||/^10\./.test(h)||/^172\.(1[6-9]|2\d|3[01])\./.test(h)||/^192\.168\./.test(h);}
 var _mt=null,_mdx=0,_mdy=0,_lan=_isLan();
 ta.addEventListener('touchstart',function(e){
+  _pinchEnded=false;
   if(e.touches.length===2&&_so){
     _pinching=true;_ps=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
     _pcx=(e.touches[0].clientX+e.touches[1].clientX)/2;_pcy=(e.touches[0].clientY+e.touches[1].clientY)/2;
-    _pzc=ZF[_zi]||1;if(_pzc===0)_pzc=1;return;
+    var _cp=cv.style.width;_pzc=_cp?Math.max(0.5,Math.min(10,parseFloat(_cp)/100)):1;return;
   }
   var t=e.touches[0];_px=t.clientX;_py=t.clientY;_mv=false;if(_dm)sendCmd({type:'mouse_down'});
 });
@@ -118,7 +119,9 @@ ta.addEventListener('touchmove',function(e){
     var ds=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
     var cx=(e.touches[0].clientX+e.touches[1].clientX)/2,cy=(e.touches[0].clientY+e.touches[1].clientY)/2;
     var nz=Math.max(0.5,Math.min(10,_pzc*ds/_ps));
+    var oz=parseFloat(cv.style.width)/100||1;
     cv.style.maxWidth='none';cv.style.maxHeight='none';cv.style.width=Math.round(nz*100)+'%';
+    sw.scrollLeft=Math.round((cx+sw.scrollLeft)*nz/oz-cx);sw.scrollTop=Math.round((cy+sw.scrollTop)*nz/oz-cy);
     sw.scrollLeft-=cx-_pcx;sw.scrollTop-=cy-_pcy;_pcx=cx;_pcy=cy;return;
   }
   var t=e.touches[0],dx=Math.round((t.clientX-_px)*4),dy=Math.round((t.clientY-_py)*4);
@@ -127,13 +130,16 @@ ta.addEventListener('touchmove',function(e){
   if(!_mt)_mt=setTimeout(function(){_mt=null;if(_mdx||_mdy){sendCmd({type:'mouse_move',dx:_mdx,dy:_mdy});_mdx=0;_mdy=0;}},50);
 });
 ta.addEventListener('touchend',function(e){
-  if(_pinching){if(e.touches.length<2)_pinching=false;return;}
+  if(_pinching){if(e.touches.length<2){_pinching=false;_pinchEnded=true;}return;}
+  if(_pinchEnded){_pinchEnded=false;return;}
   _mdx=0;_mdy=0;_te=Date.now();
   if(_dm)sendCmd({type:'mouse_up'});
   else if(!_mv){
     if(_rw&&_rh&&cv.style.display!=='none'&&cv.getBoundingClientRect){
       var t=e.changedTouches[0],rect=cv.getBoundingClientRect();
-      sendCmd({type:'mouse_click_at',x:Math.round((t.clientX-rect.left)/rect.width*cv.width),y:Math.round((t.clientY-rect.top)/rect.height*cv.height)});
+      if(t.clientX>=rect.left&&t.clientX<=rect.right&&t.clientY>=rect.top&&t.clientY<=rect.bottom)
+        sendCmd({type:'mouse_click_at',x:Math.round((t.clientX-rect.left)/rect.width*cv.width),y:Math.round((t.clientY-rect.top)/rect.height*cv.height)});
+      else sendCmd({type:'mouse_click'});
     }else sendCmd({type:'mouse_click'});
   }
 });

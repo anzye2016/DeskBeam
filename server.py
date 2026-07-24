@@ -463,34 +463,25 @@ def _elevated_init():
         print("Elevated input not available (lock screen/UAC not supported)")
 
 def do_mouse(cmd, dx=0, dy=0):
+    _elevated_send({"type":f"mouse_{cmd}","dx":dx,"dy":dy}) if _elevated_sock else None
     if cmd == "move":
-        if _elevated_sock and _elevated_send({"type":"mouse_move","dx":dx,"dy":dy}): return
         _mouse(0x0001, dx, dy)
     elif cmd == "move_to":
-        if _elevated_sock and _elevated_send({"type":"mouse_move_to","x":dx,"y":dy}): return
         ctypes.windll.user32.SetCursorPos(dx, dy)
     elif cmd == "click":
-        if _elevated_sock and _elevated_send({"type":"mouse_click"}): return
         _mouse(0x0002); _mouse(0x0004)
     elif cmd == "double_click":
-        if _elevated_sock and _elevated_send({"type":"mouse_double_click"}): return
         _mouse(0x0002); _mouse(0x0004); _mouse(0x0002); _mouse(0x0004)
     elif cmd == "down":
-        if _elevated_sock and _elevated_send({"type":"mouse_down"}): return
         _mouse(0x0002)
     elif cmd == "up":
-        if _elevated_sock and _elevated_send({"type":"mouse_up"}): return
         _mouse(0x0004)
     elif cmd == "right":
-        if _elevated_sock and _elevated_send({"type":"mouse_right"}): return
         _mouse(0x0008); _mouse(0x0010)
     elif cmd == "middle":
-        if _elevated_sock and _elevated_send({"type":"mouse_middle"}): return
         _mouse(0x0020); _mouse(0x0040)
     elif cmd == "scroll":
         delta = 120 if dy > 0 else -120
-        dir = "up" if dy > 0 else "down"
-        if _elevated_sock and _elevated_send({"type":f"scroll_{dir}"}): return
         _mouse(0x0800, data=delta)
 
 
@@ -593,11 +584,11 @@ async def ws_handler(websocket):
             text = msg.get("text", "")
             if text:
                 print(f"  type: {text}")
-                if not _elevated_sock or not _elevated_send({"type":"type_text","text":text}):
-                    await loop.run_in_executor(executor, keyboard.write, text)
+                if _elevated_sock: _elevated_send({"type":"type_text","text":text})
+                await loop.run_in_executor(executor, keyboard.write, text)
         elif cmd in _KEY_MAP:
-            if not _elevated_sock or not _elevated_send({"type":cmd}):
-                await loop.run_in_executor(executor, do_combo, cmd)
+            if _elevated_sock: _elevated_send({"type":cmd})
+            await loop.run_in_executor(executor, do_combo, cmd)
         elif cmd == "mouse_move":
             dx, dy = msg.get("dx", 0), msg.get("dy", 0)
             await loop.run_in_executor(executor, do_mouse, "move", dx, dy)

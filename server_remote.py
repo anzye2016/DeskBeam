@@ -353,6 +353,8 @@ def _mouse(flags, dx=0, dy=0, data=0):
 def do_mouse(cmd, dx=0, dy=0):
     if cmd == "move":
         _mouse(0x0001, dx, dy)
+    elif cmd == "move_to":
+        ctypes.windll.user32.SetCursorPos(dx, dy)
     elif cmd == "click":
         _mouse(0x0002); _mouse(0x0004)
     elif cmd == "down":
@@ -462,6 +464,12 @@ async def ws_handler(websocket):
                     continue
 
                 cmd = msg.get("type", "")
+
+                if cmd == "mouse_click_at":
+                    x, y = msg.get("x", 0), msg.get("y", 0)
+                    await loop.run_in_executor(executor, do_mouse, "move_to", x, y)
+                    await loop.run_in_executor(executor, do_mouse, "click")
+                    continue
 
                 if cmd == "voice_end":
                     if voice_pcm:

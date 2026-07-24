@@ -17,3 +17,4 @@ temp/
 *.ps1
 *.bak
 audit.log
+tunnel-hd-reminder.py

@@ -5,10 +5,8 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 Set shell = CreateObject("WScript.Shell")
 scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
 
-' Kill old DeskBeam processes in this directory (pythonw.exe or python.exe)
-Dim pattern : pattern = Replace(scriptDir, "\", "\\")
-shell.Run "powershell -NoProfile -Command ""Get-WmiObject Win32_Process -Filter """"name='pythonw.exe' and commandline like '%" & pattern & "%'"""" | ForEach-Object { $_.Terminate() | Out-Null }""", 0, False
-shell.Run "powershell -NoProfile -Command ""Get-WmiObject Win32_Process -Filter """"name='python.exe' and commandline like '%" & pattern & "%'"""" | ForEach-Object { $_.Terminate() | Out-Null }""", 0, False
+' Kill old instance by port (same as stop.bat)
+shell.Run "powershell -NoProfile -Command ""$ErrorActionPreference='SilentlyContinue'; Get-NetTCPConnection -LocalPort 8769 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }""", 0, False
 
 Dim pythonw : pythonw = scriptDir & "\.venv\Scripts\pythonw.exe"
 Dim serverpy : serverpy = scriptDir & "\server.py"

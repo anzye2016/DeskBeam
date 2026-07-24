@@ -57,8 +57,8 @@ textarea:focus{border-color:var(--blue);}
   <div class="scroll-wrap" id="sw"><canvas id="cv"></canvas><video id="vd" style="display:none;max-width:100%" muted autoplay playsinline></video></div>
 </div>
 <div class="mouse">
-  <button class="k" data-c="mouse_click">L</button><button class="k" data-c="mouse_middle">M</button><button class="k" data-c="mouse_right">R</button>
-  <button class="k" id="dr">Drag</button><button class="k" id="su">▲</button><button class="k" id="sd">▼</button>
+  <button class="k" data-c="mouse_click">L</button><button class="k" data-c="mouse_right">R</button>
+  <button class="k" id="su">▲</button><button class="k" id="sd">▼</button><button class="k" data-c="backspace">Backspace</button><button class="k" data-c="enter">Enter</button>
 </div>
 <div class="input-row">
   <textarea id="ti" placeholder="Type here..." rows="3"></textarea>
@@ -66,7 +66,7 @@ textarea:focus{border-color:var(--blue);}
 </div>
 <div class="keys" id="ks"></div>
 <script>
-var K=[['Ctrl+C','ctrl_c'],['Enter','enter'],['Esc','esc'],['Backspace','backspace'],['Ctrl+V','ctrl_v'],['Ctrl+A','ctrl_a'],['Ctrl+Z','ctrl_z'],['Ctrl+X','ctrl_x'],['Ctrl+S','ctrl_s'],['Tab','tab'],['Alt+Tab','alt_tab'],['Win','win'],['F5','f5'],['Ctrl+F5','ctrl_f5'],['Ctrl+J','ctrl_j'],['Shift+Enter','shift_enter'],['↑','up'],['↓','down'],['←','left'],['→','right']];
+var K=[['Ctrl+C','ctrl_c'],['Esc','esc'],['Drag','drag'],['Ctrl+V','ctrl_v'],['M','mouse_middle'],['Ctrl+A','ctrl_a'],['Ctrl+Z','ctrl_z'],['Ctrl+X','ctrl_x'],['Ctrl+S','ctrl_s'],['Tab','tab'],['Alt+Tab','alt_tab'],['Win','win'],['F5','f5'],['Ctrl+F5','ctrl_f5'],['Ctrl+J','ctrl_j'],['Shift+Enter','shift_enter'],['↑','up'],['↓','down'],['←','left'],['→','right']];
 var ks=document.getElementById('ks');K.forEach(function(d){var b=document.createElement('button');b.className='k';b.textContent=d[0];b.dataset.c=d[1];ks.appendChild(b);});
 var cv=document.getElementById('cv'),sw=document.getElementById('sw'),ta=document.getElementById('ta'),ti=document.getElementById('ti');
 var st=document.getElementById('st');let ws=null,_so=false,_dm=false;var _px=0,_py=0,_mv=false,_ts=0,_fts=[];var decoder=null;var _pc=null,_rtcDc=null;var _rw=0,_rh=0,_pinching=false,_pinchEnded=false,_ps=0,_pcx=0,_pcy=0,_pzc=0;
@@ -155,10 +155,10 @@ ta.addEventListener('mouseup',function(e){if(e.button!==0)return;if(Date.now()-_
 function sendCmd(obj){var s=JSON.stringify(obj);if(_rtcDc&&_rtcDc.readyState==='open')_rtcDc.send(s);else if(ws&&ws.readyState===WebSocket.OPEN)ws.send(s);if(_rtcDc&&(_rtcDc.readyState==='closing'||_rtcDc.readyState==='closed'))_rtcDc=null;}
 function sms(c){sendCmd({type:c});}
 document.querySelectorAll('.mouse .k[data-c]').forEach(function(b){b.addEventListener('click',function(){sms(b.dataset.c);});});
-var db=document.getElementById('dr');db.addEventListener('click',function(){_dm=!_dm;db.style.color=_dm?'var(--green)':'';db.style.borderColor=_dm?'var(--green)':'';if(_dm)sendCmd({type:'mouse_down'});else sendCmd({type:'mouse_up'});});
+
 function sr(id,cmd){var b=document.getElementById(id);if(!b)return;var iv=null,f=function(e){e.preventDefault();if(iv)return;sms(cmd);iv=setInterval(function(){sms(cmd);},80);},g=function(){if(iv){clearInterval(iv);iv=null;}};b.addEventListener('mousedown',f);b.addEventListener('mouseup',g);b.addEventListener('mouseleave',g);b.addEventListener('touchstart',f);b.addEventListener('touchend',g);b.addEventListener('touchcancel',g);}
 sr('su','scroll_up');sr('sd','scroll_down');
-ks.addEventListener('click',function(e){var b=e.target.closest('.k');if(b)sendCmd({type:b.dataset.c});});
+ks.addEventListener('click',function(e){var b=e.target.closest('.k');if(!b)return;if(b.dataset.c==='drag'){_dm=!_dm;b.style.color=_dm?'var(--green)':'';b.style.borderColor=_dm?'var(--green)':'';if(_dm)sendCmd({type:'mouse_down'});else sendCmd({type:'mouse_up'});}else sendCmd({type:b.dataset.c});});
 var sn=document.getElementById('sn'),rc=document.getElementById('rc');
 sn.addEventListener('click',function(){var t=ti.value;if(!t)return;sendCmd({type:'type_text',text:t.replace(/\n/g,' ')});ti.value='';});
 var _rr=false,_ac=null,_st=null,_ch=[];var _te=0,_ci=null;

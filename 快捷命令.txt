@@ -1,10 +1,8 @@
 cd C:\Users\anzye\projects\DeskBeam
 .\tunnel-hd.ps1 start
-.\tunnel-hd.ps1 stats
+.\tunnel-hd.ps1 status
 .\tunnel-hd.ps1 stop
 
 .\tunnel.ps1 start
-.\tunnel.ps1 stats
+.\tunnel.ps1 status
 .\tunnel.ps1 stop
-
-.\setup-elevated.ps1

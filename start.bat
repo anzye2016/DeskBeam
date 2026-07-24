@@ -8,6 +8,9 @@ fltmc >nul 2>&1 || (
 
 title DeskBeam
 
+rem Kill old instance by port
+powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; Get-NetTCPConnection -LocalPort 8769 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }"
+
 if not exist .venv (
     python -m venv .venv
     .venv\Scripts\python -m pip install -r requirements.txt -q

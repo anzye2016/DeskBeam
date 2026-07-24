@@ -1,5 +1,6 @@
 """Elevated input helper - runs as SYSTEM via scheduled task for UAC/lock screen input."""
-import json, socket, threading, time
+import json, os, socket, threading, time
+from pathlib import Path
 import ctypes
 from ctypes import wintypes
 
@@ -101,11 +102,16 @@ def handle(msg):
         _press_combo(c)
 
 def main():
+    import sys
+    try:
+        ctypes.windll.kernel32.SetConsoleCtrlHandler(None, 1)
+    except Exception:
+        pass
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s.bind(("127.0.0.1", 18771))
     s.listen()
-    import sys
+    Path(Path(__file__).parent / "elevated.pid").write_text(str(os.getpid()))
     print("Elevated input ready", flush=True)
     while True:
         conn, addr = s.accept()

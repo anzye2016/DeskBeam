@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.exe
 **/recording.wav
+elevated.pid
 **/stderr.txt
 **/server.pid
 **/server.log

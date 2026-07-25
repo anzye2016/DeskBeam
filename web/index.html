@@ -66,7 +66,7 @@ textarea:focus{border-color:var(--blue);}
 </div>
 <div class="keys" id="ks"></div>
 <script>
-var K=[['Ctrl+C','ctrl_c'],['Esc','esc'],['Drag','drag'],['Ctrl+V','ctrl_v'],['M','mouse_middle'],['Ctrl+A','ctrl_a'],['Ctrl+Z','ctrl_z'],['Ctrl+X','ctrl_x'],['Ctrl+S','ctrl_s'],['Tab','tab'],['Alt+Tab','alt_tab'],['Win','win'],['F5','f5'],['Ctrl+F5','ctrl_f5'],['Ctrl+J','ctrl_j'],['Shift+Enter','shift_enter'],['↑','up'],['↓','down'],['←','left'],['→','right']];
+var K=[['Ctrl+C','ctrl_c'],['Esc','esc'],['Ctrl+V','ctrl_v'],['Drag','drag'],['M','mouse_middle'],['Ctrl+A','ctrl_a'],['Ctrl+Z','ctrl_z'],['Ctrl+X','ctrl_x'],['Ctrl+S','ctrl_s'],['Tab','tab'],['Alt+Tab','alt_tab'],['Win','win'],['F5','f5'],['Ctrl+F5','ctrl_f5'],['Ctrl+J','ctrl_j'],['Shift+Enter','shift_enter'],['↑','up'],['↓','down'],['←','left'],['→','right']];
 var ks=document.getElementById('ks');K.forEach(function(d){var b=document.createElement('button');b.className='k';b.textContent=d[0];b.dataset.c=d[1];ks.appendChild(b);});
 var cv=document.getElementById('cv'),sw=document.getElementById('sw'),ta=document.getElementById('ta'),ti=document.getElementById('ti');
 var st=document.getElementById('st');let ws=null,_so=false,_dm=false;var _px=0,_py=0,_mv=false,_ts=0,_fts=[];var decoder=null;var _pc=null,_rtcDc=null;var _rw=0,_rh=0,_pinching=false,_pinchEnded=false,_ps=0,_pcx=0,_pcy=0,_pzc=0;
@@ -155,12 +155,13 @@ ta.addEventListener('mouseup',function(e){if(e.button!==0)return;if(Date.now()-_
 function sendCmd(obj){var s=JSON.stringify(obj);if(_rtcDc&&_rtcDc.readyState==='open')_rtcDc.send(s);else if(ws&&ws.readyState===WebSocket.OPEN)ws.send(s);if(_rtcDc&&(_rtcDc.readyState==='closing'||_rtcDc.readyState==='closed'))_rtcDc=null;}
 function sms(c){sendCmd({type:c});}
 document.querySelectorAll('.mouse .k[data-c]').forEach(function(b){b.addEventListener('click',function(){sms(b.dataset.c);});});
+document.querySelectorAll('.mouse .k[data-c="backspace"],.mouse .k[data-c="enter"]').forEach(function(b){b.addEventListener('mousedown',function(e){e.preventDefault();});b.addEventListener('click',function(){ti.focus();});});
 
 function sr(id,cmd){var b=document.getElementById(id);if(!b)return;var iv=null,f=function(e){e.preventDefault();if(iv)return;sms(cmd);iv=setInterval(function(){sms(cmd);},80);},g=function(){if(iv){clearInterval(iv);iv=null;}};b.addEventListener('mousedown',f);b.addEventListener('mouseup',g);b.addEventListener('mouseleave',g);b.addEventListener('touchstart',f);b.addEventListener('touchend',g);b.addEventListener('touchcancel',g);}
 sr('su','scroll_up');sr('sd','scroll_down');
 ks.addEventListener('click',function(e){var b=e.target.closest('.k');if(!b)return;if(b.dataset.c==='drag'){_dm=!_dm;b.style.color=_dm?'var(--green)':'';b.style.borderColor=_dm?'var(--green)':'';if(_dm)sendCmd({type:'mouse_down'});else sendCmd({type:'mouse_up'});}else sendCmd({type:b.dataset.c});});
 var sn=document.getElementById('sn'),rc=document.getElementById('rc');
-sn.addEventListener('click',function(){var t=ti.value;if(!t)return;sendCmd({type:'type_text',text:t.replace(/\n/g,' ')});ti.value='';});
+sn.addEventListener('click',function(){var t=ti.value;if(!t)return;sendCmd({type:'type_text',text:t.replace(/\n/g,' ')});ti.value='';ti.focus();});
 var _rr=false,_ac=null,_st=null,_ch=[];var _te=0,_ci=null;
 var _pxc=null,_pxb=false;
 var _awUrl=URL.createObjectURL(new Blob(["class P extends AudioWorkletProcessor{process(i,o){const c=i[0][0];for(let n=0;n<c.length;n++)o[0][0][n]=c[n];this.port.postMessage(new Float32Array(c));return true}}registerProcessor('r',P);"],{type:'application/javascript'}));

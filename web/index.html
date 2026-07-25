@@ -179,6 +179,20 @@ rc.addEventListener('mouseleave',function(){if(_rr)re();});
 rc.addEventListener('touchstart',function(e){e.preventDefault();_rcD();});
 rc.addEventListener('touchend',function(e){e.preventDefault();_rcU();});
 rc.addEventListener('touchcancel',function(e){e.preventDefault();if(_rr)re();});
+function _adjSp(show){
+  if(show){
+    var ov=300;
+    if(window.visualViewport){
+      ov=sw.getBoundingClientRect().bottom-window.visualViewport.height;
+      if(ov<200)ov=200;
+    }
+    sw.style.paddingBottom=ov+'px';
+    sw.scrollTop=sw.scrollHeight-sw.clientHeight;
+  }else sw.style.paddingBottom='';
+}
+ti.addEventListener('focus',function(){_adjSp(true);});
+ti.addEventListener('blur',function(){_adjSp(false);});
+if(window.visualViewport)window.visualViewport.addEventListener('resize',function(){if(document.activeElement===ti)_adjSp(true);});
 </script>
 </body>
 </html>

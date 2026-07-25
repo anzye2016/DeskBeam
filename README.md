@@ -33,13 +33,24 @@
 
 ## 2. 完整版安装
 
+确保系统已安装 Python 3.10+，然后：
+
+```powershell
+git clone https://github.com/anzye2016/DeskBeam.git
+cd DeskBeam
+
+copy config.example.json config.json   # 或手写配置
+start.bat                                # 首次启动自动安装依赖 + 证书
+```
+
+`start.bat` 自动完成：创建虚拟环境 → 安装依赖 → 生成自签名证书（优先 openssl，其次 Python）→ 启动服务。
+
+手动操作等效：
+
 ```powershell
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
-
-# 生成自签名证书
-openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 3650 -nodes -subj "/CN=localhost"
-
+python certgen.py                        # 自动选择 openssl 或 Python 生成
 copy config.example.json config.json
 .venv\Scripts\python server.py
 ```

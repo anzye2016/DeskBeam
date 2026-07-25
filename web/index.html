@@ -70,7 +70,7 @@ var K=[['Ctrl+C','ctrl_c'],['Esc','esc'],['Ctrl+V','ctrl_v'],['Drag','drag'],['M
 var ks=document.getElementById('ks');K.forEach(function(d){var b=document.createElement('button');b.className='k';b.textContent=d[0];b.dataset.c=d[1];ks.appendChild(b);});
 var _a=[['↑','ku','up'],['↓','kd','down'],['←','kl','left'],['→','kr','right']];_a.forEach(function(d){var b=document.createElement('button');b.className='k';b.id=d[1];b.textContent=d[0];ks.appendChild(b);sr(d[1],d[2]);});
 var cv=document.getElementById('cv'),sw=document.getElementById('sw'),ta=document.getElementById('ta'),ti=document.getElementById('ti');
-var st=document.getElementById('st');document.addEventListener('mousedown',function(e){if(e.target.closest('.k,.send,.rec'))e.preventDefault();});let ws=null,_so=false,_dm=false;var _px=0,_py=0,_mv=false,_ts=0,_fts=[];var decoder=null;var _pc=null,_rtcDc=null;var _rw=0,_rh=0,_pinching=false,_pinchEnded=false,_ps=0,_pcx=0,_pcy=0,_pzc=0;
+var st=document.getElementById('st');document.addEventListener('mousedown',function(e){if(e.target.closest('.k,.send,.rec,.ctl'))e.preventDefault();});let ws=null,_so=false,_dm=false;var _px=0,_py=0,_mv=false,_ts=0,_fts=[];var decoder=null;var _pc=null,_rtcDc=null;var _rw=0,_rh=0,_pinching=false,_pinchEnded=false,_ps=0,_pcx=0,_pcy=0,_pzc=0;
 var mb=document.getElementById('mb');
 function sm(on){
   if(on&&typeof VideoDecoder==='undefined'){
@@ -179,20 +179,8 @@ rc.addEventListener('mouseleave',function(){if(_rr)re();});
 rc.addEventListener('touchstart',function(e){e.preventDefault();_rcD();});
 rc.addEventListener('touchend',function(e){e.preventDefault();_rcU();});
 rc.addEventListener('touchcancel',function(e){e.preventDefault();if(_rr)re();});
-function _adjSp(show){
-  if(show){
-    var ov=300;
-    if(window.visualViewport){
-      ov=sw.getBoundingClientRect().bottom-window.visualViewport.height;
-      if(ov<200)ov=200;
-    }
-    sw.style.paddingBottom=ov+'px';
-    sw.scrollTop=sw.scrollHeight-sw.clientHeight;
-  }else sw.style.paddingBottom='';
-}
-ti.addEventListener('focus',function(){_adjSp(true);});
-ti.addEventListener('blur',function(){_adjSp(false);});
-if(window.visualViewport)window.visualViewport.addEventListener('resize',function(){if(document.activeElement===ti)_adjSp(true);});
+ti.addEventListener('focus',function(){sw.style.paddingBottom='400px';});
+ti.addEventListener('blur',function(){sw.style.paddingBottom='';});
 </script>
 </body>
 </html>

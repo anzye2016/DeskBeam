@@ -30,13 +30,24 @@ Hardware H.264 encoding via NVENC/QSV/AMF. Touchpad, mouse, keyboard, text input
 
 ## 2. Setup — Full Mode
 
+Requires Python 3.10+ in PATH.
+
+```powershell
+git clone https://github.com/anzye2016/DeskBeam.git
+cd DeskBeam
+
+copy config.example.json config.json    # or write your own
+start.bat                                 # auto-install + launch
+```
+
+`start.bat` automates: venv creation → pip install → certificate generation (openssl first, Python fallback) → server start.
+
+Manual equivalent:
+
 ```powershell
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
-
-# Generate self-signed cert
-openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 3650 -nodes -subj "/CN=localhost"
-
+python certgen.py                         # auto-detect openssl or use Python
 copy config.example.json config.json
 .venv\Scripts\python server.py
 ```
@@ -59,7 +70,7 @@ Open `https://<lan-ip>:8769` in Chrome/Edge. Accept the certificate warning.
 ```powershell
 python -m venv .venv
 .venv\Scripts\pip install -r requirements-remote.txt
-openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 3650 -nodes -subj "/CN=localhost"
+python certgen.py                         # auto-detect openssl or use Python
 copy config.example.json config.json
 .venv\Scripts\python server_remote.py
 ```
@@ -77,7 +88,7 @@ Deploy these 4 files:
 ```
 ├── DeskBeamRemote.exe     # double-click to start
 ├── config.json             # edit before deploying
-├── cert.pem                # generate with openssl
+├── cert.pem                # generate via python certgen.py
 └── key.pem
 ```
 
@@ -242,7 +253,7 @@ Encrypts traffic but the browser cannot verify identity. First visit shows a cer
 On LAN, an attacker can redirect traffic + present a fake cert → full MITM (desktop contents, keystrokes, voice captured).
 
 **Mitigations:**
-1. Compare cert fingerprint after generation: `openssl x509 -in cert.pem -noout -sha256 -fingerprint`
+1. Compare cert fingerprint after generation: `python -c "from cryptography import x509; c=x509.load_pem_x509_certificate(open('cert.pem','rb').read()); print(c.fingerprint(c.signature_hash_algorithm).hex())"`
 2. Use Let's Encrypt with a real domain
 3. Static ARP binding: `arp -s <gateway-ip> <gateway-mac>`
 4. Do not expose on untrusted networks

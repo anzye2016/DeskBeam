@@ -44,8 +44,8 @@ textarea:focus{border-color:var(--blue);}
 .send:active{background:var(--blue);color:var(--bg);}
 .rec{border-color:var(--accent);background:var(--surface);color:var(--dim);font-size:8px;font-weight:700;}
 .rec:active,.rec.pressed{background:var(--accent);color:var(--white);}
-.input-row.recording{position:relative;}.input-row.recording .send{display:none;}.input-row.recording .rec{position:absolute;left:0;right:0;top:0;bottom:0;width:100%;font-size:14px;z-index:2;background:var(--accent);color:var(--white);animation:rc-pulse 1s ease-in-out infinite;}
-@keyframes rc-pulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 40%,transparent);}50%{box-shadow:0 0 0 6px color-mix(in srgb,var(--accent) 0%,transparent);}}
+.input-row.recording{position:relative;}.input-row.recording .send{display:none;}.input-row.recording .rec{position:absolute;left:0;right:0;top:0;bottom:0;width:100%;font-size:14px;z-index:2;background:var(--accent);color:var(--white);animation:rc-pulse 1.2s ease-in-out infinite;}
+@keyframes rc-pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,80,80,0.4);}50%{box-shadow:0 0 0 8px rgba(255,80,80,0);}}
 .keys{overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;display:flex;gap:4px;overscroll-behavior:contain;}
 </style>
 </head>

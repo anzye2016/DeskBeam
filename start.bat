@@ -16,11 +16,7 @@ if not exist .venv (
     .venv\Scripts\python -m pip install -r requirements.txt -q
 )
 
-if not exist cert.pem (
-    echo Generating self-signed certificate...
-    where /q openssl || ( echo openssl not found & exit /b 1 )
-    openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 3650 -nodes -subj "/CN=localhost"
-)
+if not exist cert.pem .venv\Scripts\python certgen.py
 
 if not exist config.json copy config.example.json config.json >nul
 

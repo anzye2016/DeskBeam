@@ -9,8 +9,11 @@
 硬件 H.264 编码（NVENC/QSV/AMF），触控板/鼠标/键盘/文字输入/语音转文字。支持 Python 源码运行或编译为单文件 exe。
 
 <p align="center">
-  <img src="docs/screen.jpg" width="45%" alt="SCREEN 模式">
-  <img src="docs/remote.jpg" width="45%" alt="REMOTE 模式">
+  <img src="docs/remote-dark.jpg" width="45%" alt="REMOTE Dark">
+  <img src="docs/remote-light.jpg" width="45%" alt="REMOTE Light">
+  <br>
+  <img src="docs/screen-dark.jpg" width="45%" alt="SCREEN Dark">
+  <img src="docs/screen-light.jpg" width="45%" alt="SCREEN Light">
 </p>
 
 ---

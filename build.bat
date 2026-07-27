@@ -1,6 +1,6 @@
 @echo off
 cd /d "%~dp0"
-echo === DeskBeam remote-only build ===
+echo === DeskBeam full-mode build ===
 echo.
 
 :: Create temp build venv
@@ -11,34 +11,39 @@ if errorlevel 1 ( echo ERROR: python not found & exit /b 1 )
 
 call "%BUILD%\Scripts\activate.bat"
 python -m pip install --upgrade pip -q
-pip install -r requirements-remote.txt pyinstaller -q
+pip install -r requirements.txt pyinstaller -q
 if errorlevel 1 ( echo ERROR: pip install failed & exit /b 1 )
 
 echo.
-echo Building DeskBeamRemote.exe ...
+echo Building DeskBeam.exe ...
 pyinstaller --onefile --noconsole --uac-admin ^
-    --name DeskBeamRemote ^
+    --name DeskBeam ^
     --icon icon.ico ^
     --add-data "web;deskbeam_web" ^
     --hidden-import websockets.asyncio.server ^
     --hidden-import websockets.http11 ^
     --hidden-import websockets.datastructures ^
     --hidden-import keyboard._winkeyboard ^
-    server_remote.py
+    --hidden-import mss.windows ^
+    --hidden-import av.codec.context ^
+    --hidden-import av.container.output ^
+    --hidden-import aiortc.rtcrtpsender ^
+    --hidden-import aiortc.rtpreceiver ^
+    server.py
 
 if errorlevel 1 ( echo ERROR: build failed & exit /b 1 )
 
 :: Copy output
-if exist DeskBeamRemote.exe del DeskBeamRemote.exe
-copy "dist\DeskBeamRemote.exe" DeskBeamRemote.exe >nul
+if exist DeskBeam.exe del DeskBeam.exe
+copy "dist\DeskBeam.exe" DeskBeam.exe >nul
 if errorlevel 1 ( echo ERROR: copy failed & exit /b 1 )
 
 echo.
 echo === Build complete ===
-echo Output: DeskBeamRemote.exe
+echo Output: DeskBeam.exe
 echo.
 echo To deploy, copy these files to the target machine:
-echo   DeskBeamRemote.exe
+echo   DeskBeam.exe
 echo   config.json
 echo   cert.pem  (or generate one)
 echo   key.pem   (or generate one)
@@ -53,6 +58,6 @@ call deactivate >nul 2>&1
 rmdir /s /q "%BUILD%" >nul 2>&1
 rmdir /s /q dist >nul 2>&1
 rmdir /s /q build >nul 2>&1
-del DeskBeamRemote.spec >nul 2>&1
+del DeskBeam.spec >nul 2>&1
 
 pause

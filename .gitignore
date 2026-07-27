@@ -18,3 +18,4 @@ temp/
 *.bak
 audit.log
 快捷命令.txt
+*.vbs

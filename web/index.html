@@ -92,7 +92,7 @@ function sm(on){
     if(decoder){try{decoder.close();}catch(e){}decoder=null;}
     if(_pc){try{_pc.close();}catch(e){}_pc=null;}_rtcDc=null;
     var vd=document.getElementById('vd');if(vd){vd.style.display='none';}
-    cv.style.display='';document.getElementById('ph').style.display='';
+    cv.style.display='none';document.getElementById('ph').style.display='';
     document.getElementById('ph').innerHTML='<div class=ph>REMOTE MODE</div>';
     document.getElementById('pz').style.display='none';
     if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({type:'set_mode',screen:false}));

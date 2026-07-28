@@ -13,5 +13,8 @@
     "asr_health_url": "http://127.0.0.1:8082/healthz",
     "asr_cooldown": 10,
     "asr_api_url": "",
-    "asr_api_key": ""
+    "asr_api_key": "",
+    "turn_url": "",
+    "turn_user": "",
+    "turn_cred": ""
 }

@@ -49,6 +49,9 @@ _defaults = {
     "asr_api_model": "mimo-v2.5-asr",
     "asr_api_auth": "",
     "asr_api_response_path": "choices.0.message.content",
+    "turn_url": "",
+    "turn_user": "",
+    "turn_cred": "",
 }
 
 _cfg = {}
@@ -446,7 +449,13 @@ async def http_handler(connection, request):
 async def ws_handler(websocket):
     ip = websocket.remote_address[0] if websocket.remote_address else ""
     _audit("WS CONNECT", ip)
-    await websocket.send(json.dumps({"type": "hello", "streaming": False}))
+    turn_url = _cfg.get("turn_url", "").strip()
+    turn_user = _cfg.get("turn_user", "").strip()
+    turn_cred = _cfg.get("turn_cred", "").strip()
+    ice_servers = []
+    if turn_url and turn_user and turn_cred:
+        ice_servers.append({"urls": turn_url, "username": turn_user, "credential": turn_cred})
+    await websocket.send(json.dumps({"type": "hello", "streaming": False, "iceServers": ice_servers}))
     loop = asyncio.get_running_loop()
     voice_pcm = None
 

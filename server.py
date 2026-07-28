@@ -70,8 +70,6 @@ _defaults = {
     "gop": 10,
     "gop_lan": 1,
     "streaming": True,
-    "streaming": True,
-    "gop": 1,
     "wsl_asr_script": "~/scripts/asr.py",
     "asr_health_url": "http://127.0.0.1:8082/healthz",
     "asr_cooldown": 10,
@@ -80,6 +78,9 @@ _defaults = {
     "asr_api_model": "mimo-v2.5-asr",
     "asr_api_auth": "",
     "asr_api_response_path": "choices.0.message.content",
+    "turn_url": "",
+    "turn_user": "",
+    "turn_cred": "",
 }
 
 _cfg = {}
@@ -534,21 +535,31 @@ async def ws_handler(websocket):
     lan = _is_lan(ip)
     fps = max(_get_int("max_fps_lan", MAX_FPS) if lan else MAX_FPS, 1)
     gop = max(_get_int("gop_lan", GOP_SIZE) if lan else GOP_SIZE, 1)
-    await websocket.send(json.dumps({"type": "hello", "streaming": _STREAMING}))
+    turn_url = _cfg.get("turn_url", "").strip()
+    turn_user = _cfg.get("turn_user", "").strip()
+    turn_cred = _cfg.get("turn_cred", "").strip()
+    ice_servers = []
+    if turn_url and turn_user and turn_cred:
+        ice_servers.append({"urls": turn_url, "username": turn_user, "credential": turn_cred})
+    await websocket.send(json.dumps({"type": "hello", "streaming": _STREAMING, "iceServers": ice_servers}))
     loop = asyncio.get_running_loop()
     interval = 1.0 / fps
     running = True
     streaming = [False]
     encoder = [None]
     _webrtc = None
+    _webrtc_timeout_task = None
     voice_pcm = None
 
     async def _webrtc_timeout():
-        await asyncio.sleep(5)
-        if _webrtc and _webrtc._pc.iceConnectionState not in ("connected", "completed"):
-            await _webrtc.close()
-            _webrtc = None
-            print("  WebRTC timeout, falling back to WebSocket")
+        nonlocal _webrtc
+        await asyncio.sleep(30)
+        if _webrtc:
+            s = _webrtc._pc.iceConnectionState
+            if s not in ("connected", "completed"):
+                await _webrtc.close()
+                _webrtc = None
+                print(f"  WebRTC timeout (state={s})")
 
     async def handle_command(msg):
         cmd = msg.get("type", "")
@@ -653,7 +664,7 @@ async def ws_handler(websocket):
                                 await handle_command(json.loads(msg_str))
                             except Exception:
                                 pass
-                        s = WebRTCSession(_webrtc_send, _dc_handler)
+                        s = WebRTCSession(_webrtc_send, _dc_handler, ice_servers)
                         s.add_track(capture_screen_raw, fps)
                         offer = await s.create_offer()
                         _webrtc = s
@@ -662,7 +673,7 @@ async def ws_handler(websocket):
                             "sdp": offer.sdp,
                             "sdp_type": offer.type,
                         }))
-                        asyncio.create_task(_webrtc_timeout())
+                        _webrtc_timeout_task = asyncio.create_task(_webrtc_timeout())
                 elif cmd == "webrtc_answer":
                     if _webrtc:
                         await _webrtc.handle_answer(msg["sdp"], msg.get("sdp_type", "answer"))
@@ -704,6 +715,8 @@ async def ws_handler(websocket):
             encoder[0] = None
         if _webrtc:
             asyncio.ensure_future(_webrtc.close())
+        if _webrtc_timeout_task:
+            _webrtc_timeout_task.cancel()
         try:
             await sender_task
         except asyncio.CancelledError:

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """asr - 语音转文字 (命令行工具)"""
-import base64, json, sys, os, time, urllib.request, subprocess, tempfile, threading
+import base64, json, re, sys, os, time, urllib.request, subprocess, tempfile, threading
 
 SERVER = "http://127.0.0.1:8082"
 
@@ -64,8 +64,6 @@ def main():
     sys.stderr.write("\r               \r")
 
     text = data.get("text", "").strip()
-    # MOSS-Transcribe-Diarize 输出含时间戳 [0.48][S01]...，剥离纯文本
-    import re
     text = re.sub(r"\[\d+\.?\d*\]|\[S\d+\]", "", text).strip()
     print(f"\n{text}")
 
@@ -81,7 +79,6 @@ def main():
 
         segments = data.get("segments", [])
         if segments:
-            import re
             # MTD 格式（含 speaker 字段）：按标点拆成短句，时间按字数比例分配
             if "speaker" in segments[0]:
                 lines = []

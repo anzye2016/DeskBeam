@@ -1,6 +1,6 @@
 """WebRTC screen streaming with data channel for control commands."""
 import asyncio, fractions, json, time
-from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription
+from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCIceServer
 import av
 
 class ScreenTrack(MediaStreamTrack):
@@ -31,17 +31,24 @@ class ScreenTrack(MediaStreamTrack):
 
 
 class WebRTCSession:
-    def __init__(self, ws_send, data_handler=None):
-        self._pc = RTCPeerConnection()
+    def __init__(self, ws_send, data_handler=None, ice_servers=None):
+        if ice_servers:
+            servers = []
+            for s in ice_servers:
+                servers.append(RTCIceServer(urls=s["urls"], username=s.get("username", ""), credential=s.get("credential", "")))
+            config = RTCConfiguration(iceServers=servers)
+            self._pc = RTCPeerConnection(config)
+        else:
+            self._pc = RTCPeerConnection()
         self._ws_send = ws_send
         self._data_handler = data_handler
         self._track = None
         self._done = asyncio.Event()
-        self._ice_queue = []
 
         @self._pc.on("iceconnectionstatechange")
         async def on_ice():
             s = self._pc.iceConnectionState
+            print(f"  WebRTC ICE state: {s}")
             if s in ("failed", "closed", "disconnected"):
                 self._done.set()
 
@@ -81,11 +88,24 @@ class WebRTCSession:
         await self._pc.setRemoteDescription(answer)
 
     async def add_ice(self, candidate_dict):
-        from aiortc.rtcicecandidate import RTCIceCandidate
+        from aiortc import RTCIceCandidate
         c = candidate_dict
-        candidate = RTCIceCandidate(c.get("candidate", ""),
-                                    sdpMid=c.get("sdpMid", "0"),
-                                    sdpMLineIndex=c.get("sdpMLineIndex", 0))
+        parts = c.get("candidate", "").split()
+        if len(parts) >= 8 and parts[0].startswith("candidate:"):
+            _, foundation = parts[0].split(":", 1)
+            component = int(parts[1])
+            protocol = parts[2]
+            priority = int(parts[3])
+            ip = parts[4]
+            port = int(parts[5])
+            ctype = parts[7]
+        else:
+            foundation, component, protocol, priority, ip, port, ctype = "", 0, "", 0, "", 0, ""
+        candidate = RTCIceCandidate(
+            component=component, foundation=foundation, ip=ip, port=port,
+            priority=priority, protocol=protocol, type=ctype,
+            sdpMid=c.get("sdpMid", "0"),
+            sdpMLineIndex=c.get("sdpMLineIndex", 0))
         await self._pc.addIceCandidate(candidate)
 
     async def close(self):

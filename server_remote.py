@@ -325,6 +325,7 @@ _KEY_MAP = {
     "alt_tab": lambda: keyboard.send("alt+tab"),
     "win": lambda: keyboard.send("win"),
     "f5": lambda: keyboard.send("f5"),
+    "f12": lambda: keyboard.send("f12"),
     "ctrl_s": lambda: keyboard.send("ctrl+s"),
     "ctrl_z": lambda: keyboard.send("ctrl+z"),
     "ctrl_x": lambda: keyboard.send("ctrl+x"),

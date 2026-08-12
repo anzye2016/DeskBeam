@@ -1,0 +1,22 @@
+@echo off
+cd /d "%~dp0"
+
+fltmc >nul 2>&1 || (
+    powershell -Command "Start-Process cmd -ArgumentList '/c \"\"%~f0\"\"' -Verb RunAs"
+    exit /b
+)
+
+rem Kill by PID file (most recent instance)
+if exist server.pid (
+    set /p PID=<server.pid
+    taskkill /PID %PID% /F >nul 2>&1
+    del server.pid >nul 2>&1
+)
+
+rem Kill any process holding our port (catches orphaned/old instances)
+powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; Get-NetTCPConnection -LocalPort 8769 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }"
+
+rem Kill compiled exe
+taskkill /IM DeskBeam.exe /F >nul 2>&1
+
+echo Done.

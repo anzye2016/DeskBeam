@@ -65,29 +65,40 @@ button:active { background: #3B82F6; color: #0A0A0A; }
 }
 </style>
 </head>
-<body>
+<body data-totp="__TOTP__">
 <form id="login-form">
   <h1>DeskBeam</h1>
   <input type="password" id="token" name="token" placeholder="Token" autofocus>
+  <input type="text" id="totp" name="totp" placeholder="2FA code" inputmode="numeric" maxlength="6" style="display:none">
   <button type="submit">Enter</button>
   <p id="err"></p>
 </form>
 <script>
 const form = document.getElementById('login-form');
 const err = document.getElementById('err');
+const totpInput = document.getElementById('totp');
+const totpEnabled = document.getElementById('login-form').dataset.totp || document.body.dataset.totp || '__TOTP__';
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   err.textContent = '';
   const token = document.getElementById('token').value;
   if (!token) { err.textContent = 'Token required'; return; }
+  const code = totpInput.value.trim();
   const base = new URL('.', location.href).pathname.replace(/\/+$/, '');
-  const res = await fetch(base + '/login', { headers: { 'X-Auth-Token': token } });
+  const headers = { 'X-Auth-Token': token };
+  if (code) headers['X-Totp-Code'] = code;
+  const res = await fetch(base + '/login', { headers });
   if (res.redirected && res.url.endsWith('/')) {
     window.location.href = base + '/';
   } else if (res.status === 429) {
     err.textContent = 'Too many attempts. Blocked for 24h';
+  } else if (res.status === 426) {
+    // TOTP enabled: ask for the 6-digit code
+    totpInput.style.display = '';
+    totpInput.focus();
+    err.textContent = 'Enter your 2FA code';
   } else {
-    err.textContent = 'Invalid token';
+    err.textContent = 'Invalid token or code';
   }
 });
 </script>

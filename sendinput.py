@@ -165,7 +165,17 @@ def mouse_event(flags, dx=0, dy=0, data=0):
 def mouse_move_to(x, y):
     _SetCursorPos(x, y)
 
-def type_text(text):
-    for ch in text:
-        _send(scan=ord(ch), flags=KEYEVENTF_UNICODE)
-        _send(scan=ord(ch), flags=KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)
+def type_text(text, batch=500):
+    """Inject Unicode text via SendInput. Events are batched into arrays —
+    one syscall per batch instead of two per character (2000 chars:
+    4000 calls -> 4)."""
+    for start in range(0, len(text), batch):
+        events = []
+        for ch in text[start:start + batch]:
+            scan = ord(ch)
+            events.append(INPUT(INPUT_KEYBOARD,
+                                _INPUT_UNION(ki=KEYBDINPUT(0, scan, KEYEVENTF_UNICODE, 0, 0))))
+            events.append(INPUT(INPUT_KEYBOARD,
+                                _INPUT_UNION(ki=KEYBDINPUT(0, scan, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP, 0, 0))))
+        arr = (INPUT * len(events))(*events)
+        _SendInput(len(events), arr, ctypes.sizeof(INPUT))

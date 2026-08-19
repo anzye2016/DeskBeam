@@ -14,7 +14,9 @@ if exist server.pid (
 )
 
 rem Kill any process holding our port (catches orphaned/old instances)
-powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; Get-NetTCPConnection -LocalPort 8769 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }"
+for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "try{(Get-Content config.json -Raw | ConvertFrom-Json).port}catch{8769}"`) do set DB_PORT=%%P
+if not defined DB_PORT set DB_PORT=8769
+powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; Get-NetTCPConnection -LocalPort %DB_PORT% -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }"
 
 rem Kill compiled exe
 taskkill /IM DeskBeam.exe /F >nul 2>&1

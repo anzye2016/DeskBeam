@@ -9,12 +9,55 @@ except ImportError:
     cv2 = None
 
 
+_PROBE_OPTS = {
+    "h264_nvenc": {"preset": "p4", "tune": "ll"},
+    "h264_qsv": {"global_quality": "26"},
+    "h264_amf": {"usage": "ultralowlatency", "quality": "quality"},
+}
+
+
+def _encoder_works(name, width, height, fps=15, gop=15, pix_fmt="yuv420p", opts=None):
+    """create() 只查注册表、不检查硬件。Kepler 等无 NVENC 的卡上 create
+    照样成功，真正 encode 才失败。用独立 codec 编几帧验证，通过才采用。"""
+    try:
+        c = av.CodecContext.create(name, "w")
+        c.width = width
+        c.height = height
+        c.pix_fmt = pix_fmt
+        c.framerate = fps
+        c.gop_size = gop
+        c.bit_rate = 0
+        c.options = opts or {}
+        f = av.VideoFrame(width, height, pix_fmt)
+        f.planes[0].update(bytes(width * height))
+        if len(f.planes) > 1:
+            f.planes[1].update(bytes((width * height) // 4))
+        if len(f.planes) > 2:
+            f.planes[2].update(bytes((width * height) // 4))
+        for _ in range(3):
+            if list(c.encode(f)):
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def probe_encoder_name():
+    """Return the first hardware H.264 encoder that passes a real-encode
+    test (small probe frames), or 'libx264' when none does."""
+    for name in ("h264_nvenc", "h264_qsv", "h264_amf"):
+        if _encoder_works(name, 128, 72, opts=_PROBE_OPTS.get(name)):
+            return name
+    return "libx264"
+
+
 class H264Encoder:
     """Encodes raw BGRA frames to H.264 Annex B byte stream."""
 
     def __init__(self, width, height, fps=30, gop=1, cq=22, maxrate="20M", bufsize="40M", preset="p4", pix_fmt="yuv420p"):
         self.width = width
         self.height = height
+        self.enc_name = ""
         self._codec = self._open_codec(fps, gop, cq, maxrate, bufsize, preset, pix_fmt)
         self._frame = av.VideoFrame(width, height, pix_fmt)
 
@@ -32,11 +75,13 @@ class H264Encoder:
                     opts.update({"usage": "ultralowlatency", "quality": "quality"})
                 if not self._hw_usable(name, opts, fps, gop, pix_fmt):
                     continue
+                self.enc_name = name
                 return self._make_codec(name, opts, fps, gop, pix_fmt)
             except Exception:
                 continue
 
         codec = av.CodecContext.create("libx264", "w")
+        self.enc_name = "libx264"
         codec.width = self.width
         codec.height = self.height
         codec.pix_fmt = pix_fmt
@@ -63,25 +108,12 @@ class H264Encoder:
         return codec
 
     def _hw_usable(self, name, opts, fps, gop, pix_fmt):
-        """create() 只查注册表、不检查硬件。Kepler 等无 NVENC 的卡上 create
-        照样成功，真正 encode 才失败。用独立 codec 编几帧验证，通过才采用。"""
-        try:
-            c = self._make_codec(name, opts, fps, gop, pix_fmt)
-            f = av.VideoFrame(self.width, self.height, pix_fmt)
-            f.planes[0].update(bytes(self.width * self.height))
-            if len(f.planes) > 1:
-                f.planes[1].update(bytes((self.width * self.height) // 4))
-            if len(f.planes) > 2:
-                f.planes[2].update(bytes((self.width * self.height) // 4))
-            for _ in range(3):
-                if list(c.encode(f)):
-                    return True
-            return False
-        except Exception:
-            return False
+        return _encoder_works(name, self.width, self.height, fps, gop, pix_fmt, opts)
 
     def encode(self, bgra):
-        """Encode one BGRA frame (numpy array or bytes). Returns bytes (Annex B H.264) or empty bytes."""
+        """Encode one BGRA frame (numpy array or bytes). Returns bytes (Annex B
+        H.264) or empty bytes. Codec errors raise so the caller can rebuild the
+        encoder instead of silently streaming empty frames."""
         if isinstance(bgra, np.ndarray):
             arr = bgra
         else:
@@ -91,19 +123,16 @@ class H264Encoder:
             arr = np.frombuffer(bgra, dtype=np.uint8).reshape(
                 self.height, self.width, 4
             )
-        try:
-            if cv2 is not None:
-                h = self.height
-                yuv = cv2.cvtColor(arr, cv2.COLOR_BGRA2YUV_I420)
-                self._frame.planes[0].update(yuv[:h])
-                self._frame.planes[1].update(yuv[h:h + h // 4])
-                self._frame.planes[2].update(yuv[h + h // 4:])
-                frame = self._frame
-            else:
-                frame = av.VideoFrame.from_ndarray(arr, format="bgra")
-            packets = self._codec.encode(frame)
-        except Exception:
-            return b""
+        if cv2 is not None:
+            h = self.height
+            yuv = cv2.cvtColor(arr, cv2.COLOR_BGRA2YUV_I420)
+            self._frame.planes[0].update(yuv[:h])
+            self._frame.planes[1].update(yuv[h:h + h // 4])
+            self._frame.planes[2].update(yuv[h + h // 4:])
+            frame = self._frame
+        else:
+            frame = av.VideoFrame.from_ndarray(arr, format="bgra")
+        packets = self._codec.encode(frame)
         annex_b = bytearray()
         for pkt in packets:
             if pkt.size > 0:

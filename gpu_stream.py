@@ -234,6 +234,33 @@ class _NudgeWindow:
             ctypes.windll.kernel32.PostThreadMessageW(self._pump_tid, 0x0012, 0, 0)  # WM_QUIT
 
 
+def _popen_ffmpeg(cmd):
+    """Spawn ffmpeg and lift it to ABOVE_NORMAL priority, matching the
+    server process. Under CPU-heavy foreground apps a Normal-priority
+    ffmpeg loses scheduling slices, its stdout pipe backs up, and the
+    client sees frame-rate drops; ABOVE_NORMAL fixes that without the
+    starvation risk HIGH would pose on a 4-core box."""
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        bufsize=0, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    try:
+        PROCESS_SET_INFORMATION = 0x0200
+        h = ctypes.windll.kernel32.OpenProcess(PROCESS_SET_INFORMATION, False, proc.pid)
+        if h:
+            try:
+                ctypes.windll.kernel32.SetPriorityClass(h, 0x00008000)  # ABOVE_NORMAL
+            finally:
+                ctypes.windll.kernel32.CloseHandle(h)
+    except Exception:
+        pass
+    try:
+        os.set_blocking(proc.stderr.fileno(), False)
+    except Exception:
+        pass
+    return proc
+
+
 class GPUStreamer:
     """Runs `ffmpeg -f lavfi -i ddagrab=... -c:v h264_nvenc -f h264 -` and
     yields encoded H.264 access units read from its stdout.
@@ -247,6 +274,38 @@ class GPUStreamer:
     def __init__(self, width, height, fps=30, gop=15, cq=18, preset="p1",
                  maxrate="40M", bufsize="80M", draw_mouse=True,
                  capture_w=None, capture_h=None):
+        # 无 GPU 机器软编（libx264）CPU 吃不消原生分辨率。软编时自动降规格：
+        # 分辨率缩到不超过软编上限（保持宽高比），帧率降到 soft fps。硬编
+        # （NVENC/QSV）保持原生。soScale 记录是否降了分辨率，供上层查询。
+        cap_w = capture_w or width
+        cap_h = capture_h or height
+        vf = None
+        if cap_w != width or cap_h != height:
+            vf = f"hwdownload,format=bgra,scale={width}:{height},format=nv12"
+        # 探测编码器链，找到可用编码器。硬编复用探测进程（省一次启动）；
+        # 软编需降规格，探测进程释放后再按降规格重启。
+        enc_final, probe_proc = self._probe_encoder(vf, cap_w, cap_h, width, height,
+                                                    draw_mouse, fps, cq, gop, maxrate, bufsize, preset)
+        self._encoder = enc_final
+        self.soScale = False
+        need_restart = False
+        if enc_final == "libx264":
+            # 软编：分辨率缩到 soft 上限（保持宽高比），帧率降到 15 上限
+            max_soft_w = 1280
+            max_soft_h = 720
+            soft_fps = 15
+            if (width > max_soft_w or height > max_soft_h) and (width > 0 and height > 0):
+                scale = min(float(max_soft_w) / width, float(max_soft_h) / height, 1.0)
+                sw = max(160, int(width * scale // 2 * 2))
+                sh = max(120, int(height * scale // 2 * 2))
+                _dbg(f"soft encoder: downscaling {width}x{height} -> {sw}x{sh}")
+                width, height = sw, sh
+                self.soScale = True
+                need_restart = True
+            if fps > soft_fps:
+                _dbg(f"soft encoder: fps {fps} -> {soft_fps}")
+                fps = soft_fps
+                need_restart = True
         self.width = width
         self.height = height
         # Snap to a whole divisor of the monitor refresh (e.g. 55 on a 165 Hz
@@ -256,11 +315,18 @@ class GPUStreamer:
         # ddagrab captures a fixed region; when the requested output is smaller
         # than the desktop we must capture the native desktop and downscale,
         # otherwise the picture would be cropped. capture_w/h = native size.
-        cap_w = capture_w or width
-        cap_h = capture_h or height
-        vf = None
-        if cap_w != width or cap_h != height:
-            vf = f"hwdownload,format=bgra,scale={width}:{height},format=nv12"
+        # vf already includes hwdownload (downscale from native when needed).
+        if self.soScale:
+            # 软编降规格：无论是否 wan_downscale，都要从原生缩到目标尺寸。
+            # vf 已有 hwdownload+scale（若 wan_downscale）；否则补一个 scale。
+            if vf is None:
+                vf = f"hwdownload,format=bgra,scale={width}:{height},format=nv12"
+        # Queue depth is a jitter-tolerance tradeoff, not just a latency
+        # bound: on overflow the dropped frame is a P-frame, which breaks the
+        # reference chain — the decoder freezes until the next IDR (~1 GOP).
+        # 8 frames (145ms @55fps) overflowed during ordinary mouse-motion
+        # bitrate bursts and caused visible periodic stutter; 16 (290ms)
+        # rides them out.
         self._q = queue.Queue(maxsize=16)
         self._pending = None
         self._stop = threading.Event()
@@ -269,31 +335,45 @@ class GPUStreamer:
         self.produced = 0
         self.dropped = 0
         self._proc = None
-        self._encoder = None
-        self._enc_err = False
         self._err_buf = b""
-        # 编码器自动降级链：NVENC → Intel QSV → libx264 软编。
-        # 老卡（Kepler 等）NVENC API 与新版 ffmpeg 不兼容会启动失败；
-        # Intel 核显可用 h264_qsv；都不行时回退 libx264 软编，保证有画面。
+        if need_restart:
+            # 软编降规格：释放探测进程，按最终规格重启
+            try:
+                probe_proc.terminate()
+                probe_proc.wait(timeout=2)
+            except Exception:
+                pass
+            cmd = self._build_cmd(enc_final, vf, cap_w, cap_h, width, height,
+                                  draw_mouse, fps, cq, gop, maxrate, bufsize, preset)
+            _dbg(f"restarting soft encoder at {width}x{height} fps={self.fps}")
+            try:
+                self._proc = _popen_ffmpeg(cmd)
+            except OSError as e:
+                raise RuntimeError(f"encoder {enc_final}: spawn failed ({e})")
+        else:
+            # 硬编：复用探测进程，零额外启动开销
+            self._proc = probe_proc
+            _dbg(f"reusing probe process (no restart)")
+        threading.Thread(target=self._read_loop, daemon=True).start()
+        threading.Thread(target=self._err_loop, daemon=True).start()
+        self._nudge = _NudgeWindow()
+        _dbg(f"started {width}x{height} fps={self.fps} encoder={self._encoder} pid={self._proc.pid}")
+
+    def _probe_encoder(self, vf, cap_w, cap_h, width, height,
+                       draw_mouse, fps, cq, gop, maxrate, bufsize, preset):
+        """探测编码器链，返回 (编码器名, 探测进程)。探测进程不终止——
+        硬编复用为正式进程（省一次启动），软编由调用方决定是否重启降规格。"""
+        self._err_buf = b""
         for enc in self._encoder_chain():
             cmd = self._build_cmd(enc, vf, cap_w, cap_h, width, height,
                                   draw_mouse, fps, cq, gop, maxrate, bufsize, preset)
             _dbg(f"trying encoder: {enc}")
             try:
-                proc = subprocess.Popen(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    bufsize=0, creationflags=subprocess.CREATE_NO_WINDOW,
-                )
-                try:
-                    os.set_blocking(proc.stderr.fileno(), False)
-                except Exception:
-                    pass
+                proc = _popen_ffmpeg(cmd)
             except OSError as e:
                 _dbg(f"encoder {enc}: spawn failed ({e})")
                 continue
-            # 非阻塞探测：进程退出或 stderr 出现错误关键字（如 Kepler NVENC 的
-            # Cannot load cuMemAllocAsync）都算失败。成功编码器永不退出，错误
-            # 关键字在几百毫秒内暴露，0.5s 窗口足够，成功路径不干等。
+            # 非阻塞探测：进程退出或 stderr 出现错误关键字都算失败。
             err_buf = b""
             failed = False
             deadline = time.monotonic() + 0.5
@@ -317,24 +397,32 @@ class GPUStreamer:
                     pass
                 proc.wait(timeout=2)
                 continue
-            self._proc = proc
-            self._encoder = enc
+            # 探测成功：进程保持运行，返回给调用方复用
             self._err_buf = err_buf + self._drain_stderr(proc)
-            break
-        if self._proc is None:
-            raise RuntimeError("no usable H.264 encoder (nvenc/qsv/libx264 all failed)")
-        threading.Thread(target=self._read_loop, daemon=True).start()
-        threading.Thread(target=self._err_loop, daemon=True).start()
-        self._nudge = _NudgeWindow()
-        _dbg(f"started {width}x{height} fps={self.fps} encoder={self._encoder} pid={self._proc.pid}")
+            return enc, proc
+        raise RuntimeError("no usable H.264 encoder (nvenc/qsv/libx264 all failed)")
 
     def _encoder_chain(self):
-        chain = ["h264_nvenc", "h264_qsv", "libx264"]
+        chain = ["h264_nvenc", "h264_amf", "h264_qsv", "libx264"]
         return chain
 
     def _build_cmd(self, enc, vf, cap_w, cap_h, width, height,
                    draw_mouse, fps, cq, gop, maxrate, bufsize, preset):
-        if enc == "h264_qsv":
+        if enc == "h264_amf":
+            # AMF 吃不了 ddagrab 的 d3d11 硬件帧，先 hwdownload 再喂编码器。
+            # lowlatency_high_quality 兼顾延迟与画质；cqp 恒定质量（cq 映射到
+            # I/P 帧 QP），-bf 0 关 B 帧减延迟；-forced_idr 保证 GOP 对齐。
+            vf = vf or "hwdownload,format=bgra,format=nv12"
+            enc_args = [
+                "-c:v", "h264_amf",
+                "-usage", "lowlatency_high_quality",
+                "-rc", "cqp", "-qp_i", str(cq), "-qp_p", str(cq),
+                "-bf", "0", "-max_b_frames", "0",
+                "-forced_idr", "1",
+                "-g", str(gop),
+                "-profile:v", "main",
+            ]
+        elif enc == "h264_qsv":
             # QSV 吃不了 ddagrab 的 d3d11 硬件帧，先 hwdownload 再喂编码器
             vf = vf or "hwdownload,format=bgra,format=nv12"
             # QSV 用 load_plugin=hw（Win 走 MF/兼容层），参数取低延迟风格
@@ -391,16 +479,29 @@ class GPUStreamer:
         return chunk
 
     def _err_loop(self):
+        last_stats = 0.0
+        last_produced = 0
         try:
             while not self._stop.is_set():
                 chunk = self._drain_stderr(self._proc)
                 if not chunk:
                     time.sleep(0.2)
-                    continue
-                for line in chunk.splitlines():
-                    line = line.decode("utf-8", "replace").strip()
-                    if line:
-                        _dbg("stderr: " + line)
+                else:
+                    for line in chunk.splitlines():
+                        line = line.decode("utf-8", "replace").strip()
+                        if line:
+                            _dbg("stderr: " + line)
+                # Periodic pipeline stats: distinguishes capture-side stalls
+                # (produced rate drops; ddagrab missing presents under GPU
+                # load) from client-side backpressure (dropped grows; the
+                # WebSocket send cannot keep up with the network).
+                now = time.monotonic()
+                if now - last_stats >= 15:
+                    dt = now - last_stats if last_stats else 0.0
+                    rate = (self.produced - last_produced) / dt if dt else 0.0
+                    _dbg(f"stats: fps={rate:.1f} produced={self.produced} "
+                         f"dropped={self.dropped} qsize={self._q.qsize()}")
+                    last_stats, last_produced = now, self.produced
         except Exception:
             pass
 
@@ -467,7 +568,7 @@ class GPUStreamer:
         return buf
 
     # -- public API --
-    def first_frame(self, timeout=6.0):
+    def first_frame(self, timeout=2.0):
         """Wait for the first access unit, nudging the desktop (tiny window
         flash) in the background in case it is static. The first access unit
         is kept for the next read()."""

@@ -1,8 +1,10 @@
 """DeskBeam — desktop streaming and remote control for Windows."""
 
 import asyncio
+import base64
 import ctypes
 import ctypes.wintypes
+import hashlib
 import hmac
 import io
 import json
@@ -10,6 +12,7 @@ import os
 import queue
 import socket
 import ssl
+import struct as _struct
 import subprocess
 import sys
 import tempfile
@@ -154,11 +157,15 @@ except Exception:
     TEMP_DIR.mkdir(exist_ok=True)
 AUTH_TOKEN = _cfg.get("token", "").strip()
 COOKIE_NAME = "deskbeam_token"
+TOTP_SECRET = _cfg.get("totp_secret", "").strip()
 MAX_FPS = max(_get_int("max_fps", 15), 1)
 GOP_SIZE = max(_get_int("gop", 10), 1)
 AUDIT_LOG = SCRIPT_DIR / "audit.log"
 
 executor = ThreadPoolExecutor(max_workers=4)
+# Hold strong references to fire-and-forget asyncio tasks so the GC cannot
+# cancel them mid-flight (e.g. ASR transcription after voice_end).
+_BACKGROUND_TASKS = set()
 
 
 def _is_lan(ip):
@@ -172,13 +179,15 @@ def _real_ip(headers, fallback):
     """Client IP for rate-limiting/audit/LAN detection.
 
     WAN clients arrive via the SSH tunnel, so the socket peer is always
-    127.0.0.1. Prefer the X-Real-IP header set by nginx (which overwrites any
-    client-supplied value) and fall back to the socket peer for direct LAN
-    access. Trusting the header is safe because only the tunnel peer can reach
-    this server. NOTE: nginx must set X-Real-IP; otherwise all WAN clients
-    share one bucket and lock themselves out (or bypass it)."""
+    127.0.0.1. Only then is the X-Real-IP header (set by nginx, which
+    overwrites any client-supplied value) trusted; direct connections keep
+    their socket peer address, so a spoofed header cannot bypass the login
+    rate limit or fake LAN status. NOTE: nginx must set X-Real-IP; otherwise
+    all WAN clients share one bucket and lock themselves out."""
     ip = headers.get("X-Real-IP", "").strip()
-    return ip if ip else fallback
+    if ip and fallback.startswith(("127.0.0.1", "::1")):
+        return ip
+    return fallback
 
 
 # ── Auth helpers ──
@@ -198,10 +207,20 @@ if not _LOGIN_HTML:
     _LOGIN_HTML = '<!DOCTYPE html><meta charset=utf-8><title>Login</title><form id=f><input type=password id=t placeholder=Token><button>Login</button><p id=e></p></form><script>f.onsubmit=async e=>{e.preventDefault();let r=await fetch("/login",{headers:{"X-Auth-Token":t.value}});r.redirected&&r.url.endsWith("/")?location.href="/":e.textContent=r.status==429?"Blocked 24h":"Invalid token"}</script>'
 
 
-def _audit(event, ip=""):
+def _audit_write(line):
     try:
         with open(AUDIT_LOG, "a", encoding="utf-8") as f:
-            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {event} {ip}\n")
+            f.write(line)
+    except Exception:
+        pass
+
+
+def _audit(event, ip=""):
+    """Append to the audit log. File I/O runs on the executor so the event
+    loop never blocks on disk (or antivirus scanning the log file)."""
+    line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {event} {ip}\n"
+    try:
+        executor.submit(_audit_write, line)
     except Exception:
         pass
 
@@ -278,6 +297,58 @@ def _login_ok(ip):
     _LOGIN_FAILS.pop(ip, None)
 
 
+def _pem_fingerprint(pem_path):
+    """从 PEM 证书文件计算 SHA-256 指纹（hex）。用于前端 MITM 校验。"""
+    try:
+        with open(pem_path, "r", encoding="utf-8") as f:
+            text = f.read()
+        b64 = ""
+        in_cert = False
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("-----BEGIN CERTIFICATE-----"):
+                in_cert = True
+                continue
+            if line.startswith("-----END CERTIFICATE-----"):
+                break
+            if in_cert:
+                b64 += line
+        der = base64.b64decode(b64)
+        return hashlib.sha256(der).hexdigest()
+    except Exception:
+        return ""
+
+
+_CERT_FINGERPRINT = ""
+
+
+# ── TOTP (RFC 6238) two-factor auth ─────────────────────────────────────────
+# Pure Python, no external deps. Enabled only when config "totp_secret" is set
+# (base32 secret, e.g. the kind you scan into Google/Microsoft Authenticator).
+
+
+def _totp_verify(secret_b32, code, window=1):
+    """Verify a 6-digit TOTP code against a base32 secret (RFC 6238, HMAC-SHA1).
+    Allows ±`window` time-steps of clock drift."""
+    try:
+        key = base64.b32decode(secret_b32.replace(" ", "").upper())
+    except Exception:
+        return False
+    if not code or not code.isdigit() or len(code) != 6:
+        return False
+    n = int(code)
+    t0 = int(time.time()) // 30
+    for offset in range(-window, window + 1):
+        counter = t0 + offset
+        msg = _struct.pack(">Q", counter)
+        digest = hmac.new(key, msg, hashlib.sha1).digest()
+        pos = digest[-1] & 0x0F
+        value = (_struct.unpack(">I", digest[pos:pos + 4])[0] & 0x7FFFFFFF) % 1000000
+        if value == n:
+            return True
+    return False
+
+
 # ── Key / mouse mapping ──
 _KEY_MAP = {
     "enter": (press, "enter"),
@@ -310,20 +381,10 @@ def do_combo(name):
             traceback.print_exc()
 
 
-# Mouse event sequences for the simple do_mouse() commands.  Each value is the
-# MOUSEEVENTF_* flags to send in order (down+up pairs for clicks).
-_MOUSE_EVENTS = {
-    "click": (0x0002, 0x0004),
-    "double_click": (0x0002, 0x0004, 0x0002, 0x0004),
-    "down": (0x0002,),
-    "up": (0x0004,),
-    "right": (0x0008, 0x0010),
-    "right_down": (0x0008,),
-    "right_up": (0x0010,),
-    "middle": (0x0020, 0x0040),
-    "middle_down": (0x0020,),
-    "middle_up": (0x0040,),
-}
+def _mouse_flags(*flags):
+    """Send a sequence of MOUSEEVENTF_* flags (down+up pairs for clicks)."""
+    for flag in flags:
+        mouse_event(flag)
 
 
 def do_mouse(cmd, dx=0, dy=0):
@@ -340,10 +401,6 @@ def do_mouse(cmd, dx=0, dy=0):
         if _GYRO_ON:
             _GVX, _GVY = float(dx), float(dy)
         mouse_move_to(dx, dy)
-        return
-    if cmd in _MOUSE_EVENTS:
-        for flag in _MOUSE_EVENTS[cmd]:
-            mouse_event(flag)
         return
     if cmd == "scroll":
         mouse_event(0x0800, data=120 if dy > 0 else -120)
@@ -394,25 +451,24 @@ def _unlink_pid():
 def _kill_old_instances():
     try:
         _my_pid = os.getpid()
-        subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             f"Get-Process DeskBeam -ErrorAction SilentlyContinue | Where-Object {{ $_.Id -ne {_my_pid} }} | Stop-Process -Force"],
-            capture_output=True, creationflags=0x08000000, timeout=10,
-        )
         _script_dir = str(SCRIPT_DIR).replace("\\", "\\\\")
+        # 只杀本目录的 DeskBeam 实例（按 exe 路径匹配），避免与别处同名
+        # DeskBeam.exe 误杀（例如 DeskBeam2 目录）。exe 场景下命令行里含
+        # exe 完整路径，pythonw 场景下含 server.py 路径，两者都覆盖。
+        # 端口兜底仅杀 DeskBeam/python 进程，不误伤碰巧占用端口的其它服务。
         subprocess.run(
             ["powershell", "-NoProfile", "-Command",
-             f"Get-CimInstance Win32_Process -Filter \"name='pythonw.exe'\" | "
-             f"Where-Object {{ $_.CommandLine -like '*{_script_dir}*' -and $_.ProcessId -ne {_my_pid} }} | "
-             f"ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"],
-            capture_output=True, creationflags=0x08000000, timeout=10,
-        )
-        subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             f"$p=Get-NetTCPConnection -LocalPort {PORT} -ErrorAction SilentlyContinue;"
-             f"if($p){{$p|Where-Object{{$_.OwningProcess -ne {_my_pid}}}|"
-             f"ForEach-Object{{Stop-Process -Id $_.OwningProcess -Force}}}}"],
-            capture_output=True, creationflags=0x08000000, timeout=10,
+             f"Get-CimInstance Win32_Process | "
+             f"Where-Object {{ $_.CommandLine -like '*{_script_dir}*' -and "
+             f"($_.Name -like 'DeskBeam*' -or $_.Name -in @('python.exe','pythonw.exe')) -and "
+             f"$_.ProcessId -ne {_my_pid} }} | "
+             f"ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}; "
+             f"$c=Get-NetTCPConnection -LocalPort {PORT} -ErrorAction SilentlyContinue; "
+             f"if($c){{$c|Where-Object{{$_.OwningProcess -ne {_my_pid}}}|ForEach-Object{{"
+             f"$pp=Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue;"
+             f"if($pp -and ($pp.ProcessName -like 'DeskBeam*' -or $pp.ProcessName -in @('python','pythonw')))"
+             f"{{Stop-Process -Id $_.OwningProcess -Force}}}}}}"],
+            capture_output=True, creationflags=0x08000000, timeout=15,
         )
     except Exception:
         pass
@@ -442,6 +498,7 @@ def _redirect_log():
 # phone to its origin brings the accumulated offset to zero, so the cursor
 # returns to its start instead of losing the off-screen movement.
 _GYRO_ON = False
+_gyro_owner = None  # the cmd connection that last enabled gyro mode
 _GVX = 0.0
 _GVY = 0.0
 
@@ -454,7 +511,7 @@ _MOVE_LOCK = threading.Lock()
 _GPU_READY = _HAS_FFMPEG and GPUStreamer is not None
 _STREAMING = _cfg.get("streaming", True) and (_GPU_READY or (capture is not None and capture.HAS_DXCAM and capture.HAS_AV))
 _GPU_OK = [None]
-_GPU_START_RETRIES = 3
+_GPU_START_RETRIES = 2
 _GPU_START_RETRY_DELAY = 1.5
 
 if _native_screen_size:
@@ -474,6 +531,22 @@ async def http_handler(connection, request):
     global _SESSION_START
     path = request.path
 
+    if path == "/fingerprint":
+        # 返回自身证书指纹（SHA-256 hex）。前端登录后记录，每次访问校验；
+        # MITM 伪服务器返回它自己的指纹，与记录的指纹比对即可识别劫持。
+        return Response(200, "OK", Headers({"Content-Type": "text/plain; charset=utf-8"}), _CERT_FINGERPRINT.encode("utf-8"))
+
+    if path == "/cert":
+        # 下载自身证书供手机等设备安装为受信 CA（application/x-x509-ca-cert
+        # 让 Android 直接弹出证书安装），免去每次访问的证书警告。
+        if not SSL_CERT.is_file():
+            return Response(404, "Not Found", Headers({}), b"Not Found")
+        return Response(200, "OK", Headers({
+            "Content-Type": "application/x-x509-ca-cert",
+            "Content-Disposition": 'attachment; filename="cert.crt"',
+            "Cache-Control": "no-store",
+        }), SSL_CERT.read_bytes())
+
     if path == "/ws":
         if not _check_auth(request):
             return Response(403, "Forbidden", Headers({}), b"Forbidden")
@@ -488,19 +561,30 @@ async def http_handler(connection, request):
     if path.startswith("/login"):
         ip = _real_ip(request.headers, connection.remote_address[0] if connection.remote_address else "0.0.0.0")
         token_param = request.headers.get("X-Auth-Token", "")
+        totp_code = request.headers.get("X-Totp-Code", "").strip()
         if token_param:
             if not _login_allowed(ip):
                 return Response(429, "Too Many Requests", Headers({"Content-Type": "text/html; charset=utf-8"}), b"<h1>Blocked for 24h</h1>")
-            if hmac.compare_digest(token_param, AUTH_TOKEN):
-                _login_ok(ip)
-                _SESSION_START = time.time()
-                _audit("LOGIN OK", ip)
-                cookie = f"{COOKIE_NAME}={AUTH_TOKEN}; Path=/; Max-Age={_SESSION_MAX_AGE}; HttpOnly; SameSite=Strict"
-                return Response(302, "Found", Headers({"Location": "/", "Set-Cookie": cookie}), b"")
-            _login_fail(ip)
-            error = _LOGIN_HTML.replace("</body>", '<p style="color:#E61919;text-align:center">Invalid token</p></body>')
-            return Response(200, "OK", Headers({"Content-Type": "text/html; charset=utf-8"}), error.encode("utf-8"))
-        return Response(200, "OK", Headers({"Content-Type": "text/html; charset=utf-8"}), _LOGIN_HTML.encode("utf-8"))
+            if not hmac.compare_digest(token_param, AUTH_TOKEN):
+                _login_fail(ip)
+                error = _LOGIN_HTML.replace("</body>", '<p style="color:#E61919;text-align:center">Invalid token</p></body>')
+                return Response(200, "OK", Headers({"Content-Type": "text/html; charset=utf-8"}), error.encode("utf-8"))
+            # Token OK. If TOTP is enabled, require the 6-digit code too.
+            if TOTP_SECRET:
+                if not totp_code:
+                    _audit("LOGIN TOTP NEEDED", ip)
+                    return Response(426, "Upgrade Required", Headers({"Content-Type": "text/html; charset=utf-8"}), b"totp_required")
+                if not _totp_verify(TOTP_SECRET, totp_code):
+                    _login_fail(ip)
+                    _audit("LOGIN TOTP FAIL", ip)
+                    error = _LOGIN_HTML.replace("</body>", '<p style="color:#E61919;text-align:center">Invalid code</p></body>')
+                    return Response(200, "OK", Headers({"Content-Type": "text/html; charset=utf-8"}), error.encode("utf-8"))
+            _login_ok(ip)
+            _SESSION_START = time.time()
+            _audit("LOGIN OK", ip)
+            cookie = f"{COOKIE_NAME}={AUTH_TOKEN}; Path=/; Max-Age={_SESSION_MAX_AGE}; HttpOnly; SameSite=Strict"
+            return Response(302, "Found", Headers({"Location": "/", "Set-Cookie": cookie}), b"")
+        return Response(200, "OK", Headers({"Content-Type": "text/html; charset=utf-8"}), _LOGIN_HTML.replace("__TOTP__", "1" if TOTP_SECRET else "0").encode("utf-8"))
 
     if path == "/logout":
         ip = _real_ip(request.headers, connection.remote_address[0] if connection.remote_address else "0.0.0.0")
@@ -561,24 +645,21 @@ def _frame_packet(is_idr, seq, data):
     return (b"\x01" if is_idr else b"\x00") + (seq & 0xFFFFFFFF).to_bytes(4, "big") + data
 
 
-# Simple mouse commands: frontend type -> do_mouse() command.  These have no
-# parameters and no side effects beyond the mouse event itself.
-_MOUSE_SIMPLE = {
-    "mouse_click": "click",
-    "mouse_double_click": "double_click",
-    "mouse_down": "down",
-    "mouse_up": "up",
-    "mouse_right": "right",
-    "mouse_right_down": "right_down",
-    "mouse_right_up": "right_up",
-    "mouse_middle": "middle",
-    "mouse_middle_down": "middle_down",
-    "mouse_middle_up": "middle_up",
-}
-# Scroll commands need the direction encoded in dy.
-_SCROLL_MAP = {
-    "scroll_up": 1,
-    "scroll_down": -1,
+# Simple mouse commands from the frontend -> action. Most map to a fixed
+# MOUSEEVENTF_* flag sequence; scroll entries carry the direction in dy.
+_MOUSE_CMDS = {
+    "mouse_click": lambda: _mouse_flags(0x0002, 0x0004),
+    "mouse_double_click": lambda: _mouse_flags(0x0002, 0x0004, 0x0002, 0x0004),
+    "mouse_down": lambda: _mouse_flags(0x0002),
+    "mouse_up": lambda: _mouse_flags(0x0004),
+    "mouse_right": lambda: _mouse_flags(0x0008, 0x0010),
+    "mouse_right_down": lambda: _mouse_flags(0x0008),
+    "mouse_right_up": lambda: _mouse_flags(0x0010),
+    "mouse_middle": lambda: _mouse_flags(0x0020, 0x0040),
+    "mouse_middle_down": lambda: _mouse_flags(0x0020),
+    "mouse_middle_up": lambda: _mouse_flags(0x0040),
+    "scroll_up": lambda: do_mouse("scroll", 0, 1),
+    "scroll_down": lambda: do_mouse("scroll", 0, -1),
 }
 
 
@@ -605,13 +686,14 @@ async def _exec_cmd(msg):
             if k:
                 key_up(k)
         elif cmd == "set_gyro":
-            global _GYRO_ON, _GVX, _GVY
+            global _GYRO_ON, _GVX, _GVY, _gyro_owner
             on = bool(msg.get("on", False))
             if on:
                 pt = ctypes.wintypes.POINT()
                 ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
                 _GVX, _GVY = float(pt.x), float(pt.y)
             _GYRO_ON = on
+            _gyro_owner = websocket if on else None
         elif cmd == "gyro_calib":
             w = ctypes.windll.user32.GetSystemMetrics(0)
             h = ctypes.windll.user32.GetSystemMetrics(1)
@@ -625,14 +707,12 @@ async def _exec_cmd(msg):
         elif cmd == "mouse_click_at":
             x, y = msg.get("x", 0), msg.get("y", 0)
             do_mouse("move_to", x, y)
-            do_mouse("click")
+            _mouse_flags(0x0002, 0x0004)
         elif cmd == "mouse_move_to":
             x, y = msg.get("x", 0), msg.get("y", 0)
             do_mouse("move_to", x, y)
-        elif cmd in _MOUSE_SIMPLE:
-            do_mouse(_MOUSE_SIMPLE[cmd])
-        elif cmd in _SCROLL_MAP:
-            do_mouse("scroll", 0, _SCROLL_MAP[cmd])
+        elif cmd in _MOUSE_CMDS:
+            _MOUSE_CMDS[cmd]()
     except Exception:
         traceback.print_exc()
 
@@ -650,17 +730,11 @@ async def ws_cmd_handler(websocket):
     control messages are never queued behind video frames."""
     ip = _real_ip(websocket.request.headers, websocket.remote_address[0] if websocket.remote_address else "")
     _audit("WS CMD CONNECT", ip)
-    esp_cfg = {
-        "relayUrl": _cfg.get("esp_relay_url", ""),
-        "token": _cfg.get("esp_token", ""),
-        "device": _cfg.get("esp_device", ""),
-    }
     lan = _is_lan(ip)
     await websocket.send(json.dumps({
         "type": "hello",
         "streaming": _STREAMING,
         "iceServers": [],
-        "espConfig": esp_cfg,
         "lan": lan,
     }))
     loop = asyncio.get_running_loop()
@@ -686,22 +760,41 @@ async def ws_cmd_handler(websocket):
                         pcm = voice_pcm.getvalue()
                         voice_pcm = None
                         if pcm:
-                            wav_path = SCRIPT_DIR / "recording.wav"
+                            # Unique file per recording (concurrent sessions no
+                            # longer clobber each other; exe dir stays read-only
+                            # safe). Removed after successful transcription.
+                            wav_path = None
                             try:
-                                with wave.open(str(wav_path), "wb") as w:
-                                    w.setnchannels(1)
-                                    w.setsampwidth(2)
-                                    w.setframerate(16000)
-                                    w.writeframes(pcm)
+                                fd, name = tempfile.mkstemp(suffix=".wav", dir=TEMP_DIR)
+                                wav_path = Path(name)
+                                with os.fdopen(fd, "wb") as fh:
+                                    with wave.open(fh, "wb") as w:
+                                        w.setnchannels(1)
+                                        w.setsampwidth(2)
+                                        w.setframerate(16000)
+                                        w.writeframes(pcm)
                             except Exception:
+                                wav_path = None
+                            if wav_path is None:
                                 continue
                             async def _transcribe_full(path):
-                                t = await loop.run_in_executor(speech.EXECUTOR, speech.transcribe, path)
-                                if t:
-                                    await loop.run_in_executor(executor, type_text, t[:2000])
-                                else:
-                                    print(f"  ASR failed, audio saved: {path}")
-                            asyncio.create_task(_transcribe_full(wav_path))
+                                done = False
+                                try:
+                                    t = await loop.run_in_executor(speech.EXECUTOR, speech.transcribe, path)
+                                    if t:
+                                        await loop.run_in_executor(executor, type_text, t[:2000])
+                                        done = True
+                                    else:
+                                        print(f"  ASR failed, audio saved: {path}")
+                                finally:
+                                    if done:
+                                        try:
+                                            path.unlink(missing_ok=True)
+                                        except Exception:
+                                            pass
+                            _task = asyncio.create_task(_transcribe_full(wav_path))
+                            _BACKGROUND_TASKS.add(_task)
+                            _task.add_done_callback(_BACKGROUND_TASKS.discard)
                     continue
                 else:
                     await _exec_cmd(msg)
@@ -710,8 +803,351 @@ async def ws_cmd_handler(websocket):
     finally:
         _audit("WS CMD DISCONNECT", ip)
         print(f"WS cmd disconnected: {websocket.remote_address}")
-        global _GYRO_ON
-        _GYRO_ON = False
+        # Only the connection that owns gyro mode resets it; a second
+        # client disconnecting must not kill the active gyro session.
+        global _GYRO_ON, _gyro_owner
+        if _gyro_owner is websocket:
+            _GYRO_ON = False
+            _gyro_owner = None
+
+
+def _scale_rate(s, factor):
+    """Scale a rate string like '40M' by a numeric factor, rounding to int."""
+    s = str(s).strip().upper()
+    if s.endswith('M'):
+        return str(max(1, int(int(s[:-1]) * factor))) + "M"
+    if s.endswith('K'):
+        return str(max(1, int(int(s[:-1]) * factor))) + "K"
+    return str(max(1, int(int(s) * factor)))
+
+
+class _VideoSession:
+    """Per-connection video-channel state shared by the sender pipelines."""
+
+    def __init__(self, websocket, lan, fps, gop, cq, preset, maxrate, bufsize, ice_servers):
+        self.ws = websocket
+        self.loop = asyncio.get_running_loop()
+        self.lan = lan
+        self.fps = fps
+        self.gop = gop
+        self.cq = cq
+        self.preset = preset
+        self.maxrate = maxrate
+        self.bufsize = bufsize
+        self.ice_servers = ice_servers
+        self.running = True
+        self.streaming = False
+        self.webrtc = None
+        self.frame_seq = 0
+        # Dynamic bitrate: tier 0 = full speed, 1 = congested, 2 = severe.
+        # Sender loops watch _bitrate_restart and restart the encoder when set.
+        self._bitrate_tier = 0
+        self._bitrate_restart = asyncio.Event()
+        self._base_cq = cq
+        self._base_maxrate = maxrate
+        self._base_bufsize = bufsize
+
+    def effective_params(self):
+        """Return (cq, maxrate, bufsize) scaled for the current bitrate tier."""
+        cq = self._base_cq
+        maxrate = self._base_maxrate
+        bufsize = self._base_bufsize
+        if self._bitrate_tier == 1:
+            maxrate = _scale_rate(maxrate, 0.6)
+            bufsize = _scale_rate(bufsize, 0.6)
+            cq = min(cq + 3, 51)
+        elif self._bitrate_tier == 2:
+            maxrate = _scale_rate(maxrate, 0.3)
+            bufsize = _scale_rate(bufsize, 0.3)
+            cq = min(cq + 6, 51)
+        return cq, maxrate, bufsize
+
+    async def send_config(self, width, height, raw_w, raw_h, fps, enc=""):
+        await self.ws.send(json.dumps({
+            "type": "screen_config",
+            "codec": "avc1.42001F",
+            "width": width,
+            "height": height,
+            "raw_width": raw_w,
+            "raw_height": raw_h,
+            "fps": fps,
+            "enc": enc,
+        }))
+
+
+def _soft_clamp(fps, gop):
+    """Clamp fps/gop for CPU-bound software pipelines (PyAV soft encode,
+    WebRTC software track). Identity when a hardware encoder is available.
+    The ffmpeg GPU pipeline is never clamped here — capture.IS_SOFT only
+    reflects PyAV's capability, not ffmpeg's, and GPUStreamer downscales
+    itself when it ends up on libx264."""
+    if capture is not None and capture.IS_SOFT:
+        fps = min(fps, _SOFT_FPS)
+        gop = min(gop, fps)
+    return fps, gop
+
+
+async def _webrtc_timeout(sess):
+    await asyncio.sleep(30)
+    if sess.webrtc:
+        state = sess.webrtc._pc.iceConnectionState
+        if state not in ("connected", "completed"):
+            await sess.webrtc.close()
+            sess.webrtc = None
+            print(f"  WebRTC timeout (state={state})")
+
+
+async def _legacy_sender(sess):
+    """Pipeline: capture thread -> encode thread -> sender paced by absolute schedule."""
+    fps, gop = _soft_clamp(sess.fps, sess.gop)
+    interval = 1.0 / fps
+    lan = sess.lan
+    stop = threading.Event()
+    raw_q = queue.Queue(maxsize=2)
+    out_q = queue.Queue(maxsize=2)
+    encoder = None
+
+    def _drop_oldest(q):
+        try:
+            q.get_nowait()
+        except queue.Empty:
+            pass
+
+    def capture_worker():
+        cap_dt = interval * 0.95
+        last_cap = 0.0
+        last_pos = None
+        while not stop.is_set():
+            if sess.streaming and _STREAMING and not sess.webrtc:
+                try:
+                    _pt = ctypes.wintypes.POINT()
+                    ctypes.windll.user32.GetCursorPos(ctypes.byref(_pt))
+                    _pos = (_pt.x, _pt.y)
+                    if _pos != last_pos:
+                        last_pos = _pos
+                        cap_dt = interval * 0.95
+                    else:
+                        cap_dt = 0.05
+                except Exception:
+                    cap_dt = interval * 0.95
+                now = time.monotonic()
+                if now < last_cap:
+                    time.sleep(last_cap - now)
+                    continue
+                try:
+                    raw, _, _ = capture.capture_screen_raw()
+                    if raw is not None:
+                        if raw_q.full():
+                            _drop_oldest(raw_q)
+                        raw_q.put(raw)
+                except Exception:
+                    pass
+                last_cap = time.monotonic() + cap_dt
+            else:
+                time.sleep(0.5)
+
+    def encode_worker():
+        nonlocal encoder
+        while not stop.is_set():
+            if not (sess.streaming and _STREAMING and not sess.webrtc):
+                time.sleep(0.5)
+                continue
+            try:
+                raw = raw_q.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            try:
+                if encoder is None:
+                    h, w = raw.shape[:2]
+                    if not lan and _WAN_W and cv2 is not None:
+                        ew, eh = _WAN_W, _WAN_H
+                    elif capture is not None and capture.IS_SOFT and cv2 is not None:
+                        ew, eh = _SOFT_WIDTH, _SOFT_HEIGHT
+                    else:
+                        ew, eh = w, h
+                    cq, maxrate, bufsize = sess.effective_params()
+                    encoder = H264Encoder(ew, eh, fps=fps, gop=gop, cq=cq,
+                                          maxrate=maxrate, bufsize=bufsize,
+                                          preset=sess.preset)
+                    while not out_q.empty():
+                        _drop_oldest(out_q)
+                    out_q.put(("config", ew, eh, w, h, encoder.enc_name))
+                frame = raw
+                if cv2 is not None and (raw.shape[1], raw.shape[0]) != (ew, eh):
+                    frame = cv2.resize(raw, (ew, eh))
+                h264 = encoder.encode(frame)
+                if h264:
+                    if out_q.full():
+                        _drop_oldest(out_q)
+                    out_q.put(("data", has_idr(h264), h264))
+            except Exception:
+                traceback.print_exc()
+                if encoder is not None:
+                    try:
+                        encoder.close()
+                    except Exception:
+                        pass
+                    encoder = None
+
+    threading.Thread(target=capture_worker, daemon=True).start()
+    threading.Thread(target=encode_worker, daemon=True).start()
+
+    try:
+        next_send = time.monotonic()
+        while sess.running:
+            if sess.streaming and _STREAMING and not sess.webrtc:
+                # Bitrate tier change: restart encoder with adjusted params
+                if sess._bitrate_restart.is_set():
+                    sess._bitrate_restart.clear()
+                    if encoder is not None:
+                        encoder.close()
+                        encoder = None
+                    continue
+                try:
+                    item = out_q.get_nowait()
+                except queue.Empty:
+                    await asyncio.sleep(0.005)
+                    continue
+                now = time.monotonic()
+                if next_send > now:
+                    await asyncio.sleep(next_send - now)
+                if item[0] == "config":
+                    await sess.send_config(item[1], item[2], item[3], item[4], fps, item[5])
+                else:
+                    await sess.ws.send(_frame_packet(item[1], sess.frame_seq, item[2]))
+                    sess.frame_seq += 1
+                next_send += interval
+            else:
+                if encoder is not None:
+                    encoder.close()
+                    encoder = None
+                next_send = time.monotonic()
+                await asyncio.sleep(0.5)
+    except websockets.exceptions.ConnectionClosed:
+        return
+    finally:
+        stop.set()
+        if encoder is not None:
+            try:
+                encoder.close()
+            except Exception:
+                pass
+
+
+async def _gpu_sender(sess):
+    """Pure-GPU pipeline: ffmpeg ddagrab (DXGI) -> NVENC. The CPU only
+    reads the encoded H.264 access units from ffmpeg's stdout."""
+    streamer = None
+    config_sent = False
+    closing = threading.Event()
+
+    def start_streamer():
+        nonlocal streamer, config_sent
+        if streamer is not None:
+            return True
+        ew, eh = _NATIVE_W, _NATIVE_H
+        cap = None
+        if not sess.lan and _cfg.get("wan_downscale", False):
+            # ddagrab video_size crops a region; to show the whole desktop
+            # at a lower resolution, capture at native size and downscale.
+            tw = _WAN_W or _SOFT_WIDTH
+            th = _WAN_H or _SOFT_HEIGHT
+            ew, eh = min(tw, _NATIVE_W), min(th, _NATIVE_H)
+            if ew != _NATIVE_W or eh != _NATIVE_H:
+                cap = (_NATIVE_W, _NATIVE_H)
+        cq, maxrate, bufsize = sess.effective_params()
+        s = GPUStreamer(ew, eh, fps=sess.fps, gop=sess.gop, cq=cq,
+                        preset=sess.preset, maxrate=maxrate, bufsize=bufsize,
+                        capture_w=cap[0] if cap else ew,
+                        capture_h=cap[1] if cap else eh)
+        # Register before first_frame: this runs on the executor thread,
+        # and a disconnect while it is starting would cancel the coroutine
+        # with streamer still None — leaking the ffmpeg process (which
+        # keeps holding DXGI). Registering early lets the finally close it.
+        streamer = s
+        ok = False
+        try:
+            ok = s.first_frame(timeout=2.0)
+        finally:
+            if closing.is_set():
+                s.close()
+        if ok:
+            config_sent = False
+            return True
+        s.close()
+        streamer = None
+        return False
+
+    try:
+        while sess.running:
+            if sess.streaming and _STREAMING and not sess.webrtc:
+                # Bitrate tier change: restart encoder with adjusted params
+                if sess._bitrate_restart.is_set():
+                    sess._bitrate_restart.clear()
+                    if streamer:
+                        _gpu_dbg(f"bitrate adapt: tier {sess._bitrate_tier}, restarting")
+                        streamer.close()
+                        streamer = None
+                    continue
+                if streamer is None:
+                    # DXGI access can be transiently lost (lock screen, UAC,
+                    # session switch); retry a few times before giving up
+                    # and falling back to the legacy (green-crosshair) path.
+                    ok = False
+                    for attempt in range(_GPU_START_RETRIES):
+                        ok = await sess.loop.run_in_executor(executor, start_streamer)
+                        _gpu_dbg(f"start_streamer attempt {attempt + 1} -> {ok}")
+                        if ok:
+                            break
+                        await asyncio.sleep(_GPU_START_RETRY_DELAY)
+                    if not ok:
+                        await _fallback_to_legacy(sess, "failed to start")
+                        return
+                    continue
+                if not streamer.alive():
+                    _gpu_dbg(f"streamer dead (rc={streamer._proc.returncode})")
+                    streamer.close()
+                    streamer = None
+                    await _fallback_to_legacy(sess, "died")
+                    return
+                # block until the next encoded frame arrives (the ffmpeg
+                # cadence paces delivery; no artificial timing that could
+                # burst or stall on the event loop)
+                item = await sess.loop.run_in_executor(
+                    executor, lambda: streamer.read(0.5))
+                if item is None:
+                    await asyncio.sleep(0.005)
+                    continue
+                is_idr, data = item
+                if not config_sent:
+                    config_sent = True
+                    await sess.send_config(streamer.width, streamer.height,
+                                           _NATIVE_W, _NATIVE_H, streamer.fps,
+                                           streamer._encoder)
+                await sess.ws.send(_frame_packet(is_idr, sess.frame_seq, data))
+                sess.frame_seq += 1
+            else:
+                if streamer:
+                    streamer.close()
+                    streamer = None
+                await asyncio.sleep(0.5)
+    except websockets.exceptions.ConnectionClosed:
+        return
+    except Exception as e:
+        traceback.print_exc()
+        _gpu_dbg(f"gpu sender exception: {e!r}")
+    finally:
+        closing.set()
+        if streamer:
+            streamer.close()
+            streamer = None
+
+
+async def _fallback_to_legacy(sess, reason):
+    _gpu_dbg(f"fallback to legacy ({reason})")
+    print(f"  GPU streamer {reason} — falling back to legacy pipeline")
+    _GPU_OK[0] = False
+    await _legacy_sender(sess)
 
 
 async def ws_handler(websocket):
@@ -719,276 +1155,28 @@ async def ws_handler(websocket):
     ip = _real_ip(websocket.request.headers, websocket.remote_address[0] if websocket.remote_address else "")
     _audit("WS CONNECT", ip)
     lan = _is_lan(ip)
-    if capture is not None and capture.IS_SOFT:
-        fps = _SOFT_FPS
-        gop = _SOFT_FPS
-    else:
-        fps = _pick_int(lan, "max_fps", "max_fps_lan", MAX_FPS)
-        gop = _pick_int(lan, "gop", "gop_lan", GOP_SIZE)
-    cq = _pick_int(lan, "cq", "cq_lan", 26, 18)
-    preset = _pick(lan, "preset", "preset_lan", "p4", "p1")
-    maxrate = _pick(lan, "maxrate", "maxrate_lan", "6M", "40M")
-    bufsize = _pick(lan, "bufsize", "bufsize_lan", "12M", "80M")
-    ice_servers = []
-    loop = asyncio.get_running_loop()
-    interval = 1.0 / fps
-    running = True
-    streaming = [False]
-    encoder = [None]
-    frame_seq = [0]
-    _webrtc = None
+    sess = _VideoSession(
+        websocket, lan,
+        _pick_int(lan, "max_fps", "max_fps_lan", MAX_FPS),
+        _pick_int(lan, "gop", "gop_lan", GOP_SIZE),
+        _pick_int(lan, "cq", "cq_lan", 26, 18),
+        _pick(lan, "preset", "preset_lan", "p4", "p1"),
+        _pick(lan, "maxrate", "maxrate_lan", "6M", "40M"),
+        _pick(lan, "bufsize", "bufsize_lan", "6M", "40M"),
+        [],
+    )
     _webrtc_timeout_task = None
 
-    async def _webrtc_timeout():
-        nonlocal _webrtc
-        await asyncio.sleep(30)
-        if _webrtc:
-            s = _webrtc._pc.iceConnectionState
-            if s not in ("connected", "completed"):
-                await _webrtc.close()
-                _webrtc = None
-                print(f"  WebRTC timeout (state={s})")
-
-    async def screen_sender_legacy():
-        """Pipeline: capture thread -> encode thread -> sender paced by absolute schedule."""
-        stop = threading.Event()
-        raw_q = queue.Queue(maxsize=2)
-        out_q = queue.Queue(maxsize=2)
-
-        def _drop_oldest(q):
-            try:
-                q.get_nowait()
-            except queue.Empty:
-                pass
-
-        def capture_worker():
-            cap_dt = interval * 0.95
-            last_cap = 0.0
-            last_pos = None
-            while not stop.is_set():
-                if streaming[0] and _STREAMING and not _webrtc:
-                    try:
-                        _pt = ctypes.wintypes.POINT()
-                        ctypes.windll.user32.GetCursorPos(ctypes.byref(_pt))
-                        _pos = (_pt.x, _pt.y)
-                        if _pos != last_pos:
-                            last_pos = _pos
-                            cap_dt = interval * 0.95
-                        else:
-                            cap_dt = 0.05
-                    except Exception:
-                        cap_dt = interval * 0.95
-                    now = time.monotonic()
-                    if now < last_cap:
-                        time.sleep(last_cap - now)
-                        continue
-                    try:
-                        raw, _, _ = capture.capture_screen_raw()
-                        if raw is not None:
-                            if raw_q.full():
-                                _drop_oldest(raw_q)
-                            raw_q.put(raw)
-                    except Exception:
-                        pass
-                    last_cap = time.monotonic() + cap_dt
-                else:
-                    time.sleep(0.5)
-
-        def encode_worker():
-            while not stop.is_set():
-                if not (streaming[0] and _STREAMING and not _webrtc):
-                    time.sleep(0.5)
-                    continue
-                try:
-                    raw = raw_q.get(timeout=0.2)
-                except queue.Empty:
-                    continue
-                try:
-                    if encoder[0] is None:
-                        h, w = raw.shape[:2]
-                        if not lan and _WAN_W and cv2 is not None:
-                            ew, eh = _WAN_W, _WAN_H
-                        elif capture is not None and capture.IS_SOFT and cv2 is not None:
-                            ew, eh = _SOFT_WIDTH, _SOFT_HEIGHT
-                        else:
-                            ew, eh = w, h
-                        encoder[0] = H264Encoder(ew, eh, fps=fps, gop=gop, cq=cq, maxrate=maxrate, bufsize=bufsize, preset=preset)
-                        while not out_q.empty():
-                            _drop_oldest(out_q)
-                        out_q.put(("config", ew, eh, w, h))
-                    frame = raw
-                    if cv2 is not None and (raw.shape[1], raw.shape[0]) != (ew, eh):
-                        frame = cv2.resize(raw, (ew, eh))
-                    h264 = encoder[0].encode(frame)
-                    if h264:
-                        if out_q.full():
-                            _drop_oldest(out_q)
-                        out_q.put(("data", has_idr(h264), h264))
-                except Exception:
-                    traceback.print_exc()
-                    encoder[0] = None
-
-        cap_thread = threading.Thread(target=capture_worker, daemon=True)
-        enc_thread = threading.Thread(target=encode_worker, daemon=True)
-        cap_thread.start()
-        enc_thread.start()
-
-        try:
-            next_send = time.monotonic()
-            while running:
-                if streaming[0] and _STREAMING and not _webrtc:
-                    try:
-                        item = out_q.get_nowait()
-                    except queue.Empty:
-                        await asyncio.sleep(0.005)
-                        continue
-                    now = time.monotonic()
-                    if next_send > now:
-                        await asyncio.sleep(next_send - now)
-                    if item[0] == "config":
-                        await websocket.send(json.dumps({
-                            "type": "screen_config",
-                            "codec": "avc1.42001F",
-                            "width": item[1],
-                            "height": item[2],
-                            "raw_width": item[3],
-                            "raw_height": item[4],
-                            "fps": fps,
-                        }))
-                    else:
-                        await websocket.send(_frame_packet(item[1], frame_seq[0], item[2]))
-                        frame_seq[0] += 1
-                    next_send += interval
-                else:
-                    if encoder[0]:
-                        encoder[0].close()
-                        encoder[0] = None
-                    next_send = time.monotonic()
-                    await asyncio.sleep(0.5)
-        except websockets.exceptions.ConnectionClosed:
-            return
-        finally:
-            stop.set()
-
-    async def screen_sender_gpu():
-        """Pure-GPU pipeline: ffmpeg ddagrab (DXGI) -> NVENC. The CPU only
-        reads the encoded H.264 access units from ffmpeg's stdout."""
-        streamer = [None]
-        config_sent = [False]
-        closing = threading.Event()
-
-        def start_streamer():
-            if streamer[0] is not None:
-                return True
-            ew, eh = _NATIVE_W, _NATIVE_H
-            cap = None
-            if not lan and _cfg.get("wan_downscale", False):
-                # ddagrab video_size crops a region; to show the whole desktop
-                # at a lower resolution, capture at native size and downscale.
-                tw = _WAN_W or _SOFT_WIDTH
-                th = _WAN_H or _SOFT_HEIGHT
-                ew, eh = min(tw, _NATIVE_W), min(th, _NATIVE_H)
-                if ew != _NATIVE_W or eh != _NATIVE_H:
-                    cap = (_NATIVE_W, _NATIVE_H)
-            s = GPUStreamer(ew, eh, fps=fps, gop=gop, cq=cq, preset=preset,
-                            maxrate=maxrate, bufsize=bufsize,
-                            capture_w=cap[0] if cap else ew,
-                            capture_h=cap[1] if cap else eh)
-            # Register before first_frame: this runs on the executor thread,
-            # and a disconnect while it is starting would cancel the coroutine
-            # with streamer[0] still None — leaking the ffmpeg process (which
-            # keeps holding DXGI). Registering early lets the finally close it.
-            streamer[0] = s
-            try:
-                ok = s.first_frame(timeout=4.0)
-            finally:
-                if closing.is_set():
-                    s.close()
-            if ok:
-                config_sent[0] = False
-                return True
-            s.close()
-            streamer[0] = None
-            return False
-
-        async def fallback_to_legacy(reason):
-            _gpu_dbg(f"fallback to legacy ({reason})")
-            print(f"  GPU streamer {reason} — falling back to legacy pipeline")
-            _GPU_OK[0] = False
-            await screen_sender_legacy()
-
-        try:
-            while running:
-                if streaming[0] and _STREAMING and not _webrtc:
-                    if streamer[0] is None:
-                        # DXGI access can be transiently lost (lock screen, UAC,
-                        # session switch); retry a few times before giving up
-                        # and falling back to the legacy (green-crosshair) path.
-                        ok = False
-                        for attempt in range(_GPU_START_RETRIES):
-                            ok = await loop.run_in_executor(executor, start_streamer)
-                            _gpu_dbg(f"start_streamer attempt {attempt + 1} -> {ok}")
-                            if ok:
-                                break
-                            await asyncio.sleep(_GPU_START_RETRY_DELAY)
-                        if not ok:
-                            await fallback_to_legacy("failed to start")
-                            return
-                        continue
-                    if not streamer[0].alive():
-                        _gpu_dbg(f"streamer dead (rc={streamer[0]._proc.returncode})")
-                        streamer[0].close()
-                        streamer[0] = None
-                        await fallback_to_legacy("died")
-                        return
-                    # block until the next encoded frame arrives (the ffmpeg
-                    # cadence paces delivery; no artificial timing that could
-                    # burst or stall on the event loop)
-                    item = await loop.run_in_executor(
-                        executor, lambda: streamer[0].read(0.5))
-                    if item is None:
-                        await asyncio.sleep(0.005)
-                        continue
-                    is_idr, data = item
-                    if not config_sent[0]:
-                        config_sent[0] = True
-                        await websocket.send(json.dumps({
-                            "type": "screen_config",
-                            "codec": "avc1.42001F",
-                            "width": streamer[0].width,
-                            "height": streamer[0].height,
-                            "raw_width": _NATIVE_W,
-                            "raw_height": _NATIVE_H,
-                            "fps": streamer[0].fps,
-                        }))
-                    await websocket.send(_frame_packet(is_idr, frame_seq[0], data))
-                    frame_seq[0] += 1
-                else:
-                    if streamer[0]:
-                        streamer[0].close()
-                        streamer[0] = None
-                    await asyncio.sleep(0.5)
-        except websockets.exceptions.ConnectionClosed:
-            return
-        except Exception as e:
-            traceback.print_exc()
-            _gpu_dbg(f"gpu sender exception: {e!r}")
-        finally:
-            closing.set()
-            if streamer[0]:
-                streamer[0].close()
-                streamer[0] = None
-
+    # _ffmpeg_ready() re-checks the file so a just-downloaded ffmpeg is
+    # picked up; _GPU_OK is reset per connection so one early GPU failure
+    # does not permanently pin this process to the legacy pipeline.
     async def screen_sender():
-        # _ffmpeg_ready() re-checks the file so a just-downloaded ffmpeg is
-        # picked up; _GPU_OK is reset per connection so one early GPU failure
-        # does not permanently pin this process to the legacy pipeline.
         if _ffmpeg_ready() and GPUStreamer is not None and _GPU_OK[0] is not False:
             _gpu_dbg("sender: GPU path selected")
-            await screen_sender_gpu()
+            await _gpu_sender(sess)
         else:
             _gpu_dbg("sender: legacy path selected")
-            await screen_sender_legacy()
+            await _legacy_sender(sess)
 
     _GPU_OK[0] = None  # re-evaluate GPU path for this connection
     sender_task = asyncio.create_task(screen_sender())
@@ -1006,13 +1194,11 @@ async def ws_handler(websocket):
 
             if cmd == "set_mode":
                 if not msg.get("screen", False):
-                    if _webrtc:
-                        await _webrtc.close()
-                        _webrtc = None
-                streaming[0] = msg.get("screen", False)
-                if streaming[0]:
-                    encoder[0] = None
-                if streaming[0] and WebRTCSession and msg.get("format") == "webrtc":
+                    if sess.webrtc:
+                        await sess.webrtc.close()
+                        sess.webrtc = None
+                sess.streaming = msg.get("screen", False)
+                if sess.streaming and WebRTCSession and msg.get("format") == "webrtc":
                     async def _webrtc_send(data):
                         try:
                             await websocket.send(data)
@@ -1023,33 +1209,37 @@ async def ws_handler(websocket):
                             await _exec_cmd(json.loads(msg_str))
                         except Exception:
                             pass
-                    s = WebRTCSession(_webrtc_send, _dc_handler, ice_servers)
-                    s.add_track(capture.capture_screen_raw, fps)
+                    s = WebRTCSession(_webrtc_send, _dc_handler, sess.ice_servers)
+                    track_fps, _ = _soft_clamp(sess.fps, sess.gop)
+                    s.add_track(capture.capture_screen_raw, track_fps)
                     offer = await s.create_offer()
-                    _webrtc = s
+                    sess.webrtc = s
                     await websocket.send(json.dumps({
                         "type": "webrtc_offer",
                         "sdp": offer.sdp,
                         "sdp_type": offer.type,
                     }))
-                    _webrtc_timeout_task = asyncio.create_task(_webrtc_timeout())
+                    _webrtc_timeout_task = asyncio.create_task(_webrtc_timeout(sess))
             elif cmd == "webrtc_answer":
-                if _webrtc:
-                    await _webrtc.handle_answer(msg["sdp"], msg.get("sdp_type", "answer"))
+                if sess.webrtc:
+                    await sess.webrtc.handle_answer(msg["sdp"], msg.get("sdp_type", "answer"))
             elif cmd == "webrtc_ice":
-                if _webrtc:
-                    await _webrtc.add_ice(msg["candidate"])
+                if sess.webrtc:
+                    await sess.webrtc.add_ice(msg["candidate"])
+            elif cmd == "bitrate_adapt":
+                tier = max(0, min(2, int(msg.get("tier", 0))))
+                if tier != sess._bitrate_tier:
+                    print(f"  bitrate adapt: tier {sess._bitrate_tier} -> {tier}")
+                    sess._bitrate_tier = tier
+                    sess._bitrate_restart.set()
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
         _audit("WS DISCONNECT", ip)
-        running = False
+        sess.running = False
         sender_task.cancel()
-        if encoder[0]:
-            encoder[0].close()
-            encoder[0] = None
-        if _webrtc:
-            asyncio.ensure_future(_webrtc.close())
+        if sess.webrtc:
+            asyncio.ensure_future(sess.webrtc.close())
         if _webrtc_timeout_task:
             _webrtc_timeout_task.cancel()
         try:
@@ -1061,6 +1251,7 @@ async def ws_handler(websocket):
 
 # ── Main ──
 async def main():
+    global _CERT_FINGERPRINT
     if sys.platform == "win32":
         try:
             ctypes.windll.winmm.timeBeginPeriod(1)
@@ -1078,9 +1269,14 @@ async def main():
     if SSL_CERT.is_file() and SSL_KEY.is_file():
         ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ssl_context.load_cert_chain(SSL_CERT, SSL_KEY)
+        # 自身证书指纹：前端登录后记录，每次访问校验。若连接到的服务器证书
+        # 指纹与记录的指纹不同，说明可能被中间人（ARP 欺骗 + 伪证书）劫持。
+        # 直接从 PEM 文件解析（不依赖 get_certificate 的版本差异）。
+        _CERT_FINGERPRINT = _pem_fingerprint(SSL_CERT)
         proto = "https"
     else:
         ssl_context = None
+        _CERT_FINGERPRINT = ""
         proto = "http"
 
     if not WEB_DIR.is_dir():

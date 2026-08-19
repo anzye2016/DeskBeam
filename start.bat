@@ -8,8 +8,10 @@ fltmc >nul 2>&1 || (
 
 title DeskBeam
 
-rem Kill old instance by port
-powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; Get-NetTCPConnection -LocalPort 8769 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }"
+rem Kill old instance by port (read port from config.json, default 8769)
+for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "try{(Get-Content config.json -Raw | ConvertFrom-Json).port}catch{8769}"`) do set DB_PORT=%%P
+if not defined DB_PORT set DB_PORT=8769
+powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; Get-NetTCPConnection -LocalPort %DB_PORT% -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }"
 
 if not exist .venv (
     python -m venv .venv
@@ -21,7 +23,7 @@ if not exist cert.pem .venv\Scripts\python certgen.py
 if not exist config.json copy config.example.json config.json >nul
 
 echo.
-echo  DeskBeam  https://localhost:8769
+echo  DeskBeam  https://localhost:%DB_PORT%
 echo.
 
 .venv\Scripts\python server.py

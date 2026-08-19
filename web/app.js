@@ -7,11 +7,29 @@ function _mqAcc(dx,dy){
   _mqx+=dx;_mqy+=dy;
   if(!_mqT){_mqT=setTimeout(function(){_mqT=null;if(_mqx||_mqy){sendCmd({type:'mouse_move',dx:_mqx,dy:_mqy});_mqx=0;_mqy=0;}},8);}
 }
+function _mkShiftBtn(sh){
+  var shT=null;
+  var rel=function(){
+    if(_gShSt||shT){_gShSt=false;if(shT){clearTimeout(shT);shT=null;}sh.classList.remove('sh-on');sendCmd({type:'key_up',key:'shift'});}
+  };
+  var d=function(){
+    if(_gShSt){rel();return;}
+    sendCmd({type:'key_down',key:'shift'});
+    shT=setTimeout(function(){shT=null;_gShSt=true;sh.classList.add('sh-on');},500);
+  };
+  var u=function(){
+    if(shT){clearTimeout(shT);shT=null;sendCmd({type:'key_up',key:'shift'});return;}
+    if(_gShSt)sh.classList.add('sh-on');
+  };
+  sh.addEventListener('mousedown',d);sh.addEventListener('mouseup',u);sh.addEventListener('mouseleave',u);
+  sh.addEventListener('touchstart',function(e){e.preventDefault();d();});
+  sh.addEventListener('touchend',function(e){e.preventDefault();u();});
+  return rel;
+}
 var ks=document.getElementById('ks');
 function _mkBtn(spec){
   var b=document.createElement('button');b.className='k';b.textContent=spec.t;
   if(spec.m==='hold'){_bindHoldEl(b,spec.d,spec.u,spec.nc||false,spec.nr);}
-  else if(spec.m==='rep'){_bindRepEl(b,spec.c);}
   else if(spec.fn){_tapEl(b,spec.fn);}
   else{_tapEl(b,function(){sendCmd({type:spec.c});});}
   return b;
@@ -30,8 +48,6 @@ var _KEYS=[
   {t:'Ctrl+X',c:'ctrl_x'},{t:'Ctrl+S',c:'ctrl_s'},{t:'Tab',c:'tab'},{t:'Alt+Tab',c:'alt_tab'},
   {t:'Win',c:'win'},{t:'F5',c:'f5'},{t:'Ctrl+F5',c:'ctrl_f5'},{t:'Ctrl+J',c:'ctrl_j'},
   {t:'Shift+Enter',c:'shift_enter'},{t:'F12',c:'f12'},
-  {t:'UAC',fn:_espUac},{t:'JS',fn:_espJs},{t:'ESP ESC',fn:_espEsc},{t:'Lock',fn:_espLock},
-  {t:'ESP Win',fn:_espWin},{t:'ESP L',fn:_espL},
   {t:'↑',m:'hold',d:{type:'key_down',key:'up'},u:{type:'key_up',key:'up'},nr:true,nc:true},
   {t:'↓',m:'hold',d:{type:'key_down',key:'down'},u:{type:'key_up',key:'down'},nr:true,nc:true},
   {t:'←',m:'hold',d:{type:'key_down',key:'left'},u:{type:'key_up',key:'left'},nr:true,nc:true},
@@ -47,25 +63,41 @@ _KEYS.forEach(function(s){ks.appendChild(_mkBtn(s));});
     if(ks.children[i].textContent==='Tab'){tabBtn=ks.children[i];break;}
   }
   if(tabBtn)ks.insertBefore(sh,tabBtn.nextSibling);else ks.appendChild(sh);
-  var shT=null;
-  _gShRel2=function(){
-    if(_gShSt||shT){_gShSt=false;if(shT){clearTimeout(shT);shT=null;}sh.classList.remove('sh-on');sendCmd({type:'key_up',key:'shift'});}
-  };
-  var d=function(){
-    if(_gShSt){_gShRel2();return;}
-    sendCmd({type:'key_down',key:'shift'});
-    shT=setTimeout(function(){shT=null;_gShSt=true;sh.classList.add('sh-on');},500);
-  };
-  var u=function(){
-    if(shT){clearTimeout(shT);shT=null;sendCmd({type:'key_up',key:'shift'});return;}
-    if(_gShSt)sh.classList.add('sh-on');
-  };
-  sh.addEventListener('mousedown',d);sh.addEventListener('mouseup',u);sh.addEventListener('mouseleave',u);
-  sh.addEventListener('touchstart',function(e){e.preventDefault();d();});
-  sh.addEventListener('touchend',function(e){e.preventDefault();u();});
+  _gShRel2=_mkShiftBtn(sh);
 })();
 var cv=document.getElementById('cv'),sw=document.getElementById('sw'),ta=document.getElementById('ta'),ti=document.getElementById('ti');
 var st=document.getElementById('st');
+
+/* ── 证书指纹校验（防局域网 MITM）────────────────────────────
+   登录成功后把 /fingerprint 的指纹存 localStorage；此后每次加载页面
+   都重新拉取并比对。若指纹与记录的不同，说明连接被中间人劫持
+   （ARP 欺骗 + 伪证书），全屏告警并阻断。 */
+(function () {
+  var KEY = 'deskbeam_cert_fp3';
+  function blockMitm() {
+    var d = document.createElement('div');
+    d.id = 'mitm-block';
+    d.style.cssText = 'position:fixed;inset:0;background:rgba(120,10,10,.97);color:#fff;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;text-align:center;padding:24px;font-family:inherit';
+    d.innerHTML = '<div style="font-size:18px;font-weight:600;letter-spacing:.08em">⚠ 安全警告：证书指纹不一致</div>' +
+      '<div style="font-size:13px;max-width:420px;line-height:1.6">连接到的服务器证书与之前记录的不同，' +
+      '可能是中间人攻击（ARP 欺骗 + 伪造证书）。请停止使用，确认网络环境后重新登录。</div>' +
+      '<button onclick="location.reload()" style="padding:8px 20px;cursor:pointer">刷新重试</button>';
+    document.body.appendChild(d);
+  }
+  function start() {
+    if (location.protocol !== 'https:') return;
+    fetch('fingerprint', { cache: 'no-store' }).then(function (r) { return r.text(); }).then(function (fp) {
+      fp = (fp || '').trim();
+      if (!fp) return;
+      var stored = localStorage.getItem(KEY);
+      if (stored && stored !== fp) { blockMitm(); return; }
+      if (!stored) localStorage.setItem(KEY, fp);
+    }).catch(function () {});
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+  else start();
+})();
+
 document.addEventListener('mousedown',function(e){if(e.target.closest('.k,.send,.rec,.rec-mini,.ctl'))e.preventDefault();});
 let ws=null,wsV=null,_so=false,_dm=false;
 var _px=0,_py=0,_mv=false,_ts=0,_vfps=30,_fts=[],_qmtx=0,_qmty=0,_qmp=false;
@@ -74,6 +106,7 @@ var decoder=null;
 var _pc=null,_rtcDc=null;
 var _rw=0,_rh=0,_rwr=0,_rhr=0,_pinching=false,_pinchEnded=false,_ps=0,_pcx=0,_pcy=0,_pzc=0;
 var _iceServers=[];
+var _encName='';
 var mb=document.getElementById('mb');
 /* Render queue: decoded frames are buffered (pre-fill, cap 6) and drawn on
    an absolute fractional schedule that matches the capture rate exactly, so
@@ -103,7 +136,11 @@ function _rqStart(){
       var f=_rq.shift();
       try{
         var tg=_gm?document.getElementById('gc'):cv;
-        tg.getContext('2d').drawImage(f,0,0);
+        /* 不加 desynchronized:个别驱动上反而造成主线程停顿,解码输出
+           回调被拖慢(fps 掉半)。缓存 context 本身仍是免每帧查找的开销。 */
+        var ctx=tg._dctx;
+        if(!ctx){ctx=tg.getContext('2d');tg._dctx=ctx;}
+        ctx.drawImage(f,0,0);
       }catch(_){}
       try{f.close();}catch(_){}
     }
@@ -111,22 +148,44 @@ function _rqStart(){
     if(next<now-iv)next=now;  // resync if a tick fell behind
   },8);
 }
+function _setupDecoder(m){
+  if(typeof VideoDecoder==='undefined')return false;
+  _rqStop();_rw=m.width;_rh=m.height;_rwr=m.raw_width||_rw;_rhr=m.raw_height||_rh;_ts=0;_vfps=m.fps||30;_rqPre=1;_latIv=1000/_vfps;_latArrPrev=0;
+  if(decoder){try{decoder.close();}catch(ex){}decoder=null;}
+  var vd=document.getElementById('vd');if(vd)vd.style.display='none';
+  var tg=_gm?document.getElementById('gc'):cv;
+  tg.style.display='';tg.width=_rw;tg.height=_rh;
+  decoder=new VideoDecoder({
+    output:function(f){
+      var n=performance.now();_fts.push(n);_fts.length>10&&_fts.shift();
+      var _nw=performance.now();
+      if(_nw-_stLast>500){
+        _stLast=_nw;
+        var fps=_fts.length<3?0:Math.min(120,Math.round((_fts.length-1)*1000/(_fts[_fts.length-1]-_fts[0])));
+        st.textContent='LIVE '+String(fps).padStart(3,'0')+'fps';
+      }
+      _rq.push(f);
+      if(_rq.length>_rqMax){try{_rq.shift().close();}catch(_){}}
+      _rqStart();
+    },
+    error:function(e){console.error('Decoder:',e);}
+  });
+  /* 不加 optimizeForLatency:实测会强制低吞吐解码路径,1440p@55
+     掉到 ~30fps(编码侧已 -bf 0 无重排,不需要它)。 */
+  decoder.configure({codec:m.codec});_fts=[];
+  return true;
+}
+function _startScreenVideo(){
+  if(wsV&&wsV.readyState===WebSocket.OPEN)
+    wsV.send(JSON.stringify({type:'set_mode',screen:true}));
+}
 function sm(on){
   _so=on;mb.textContent=on?'SCREEN':'REMOTE';mb.className='mode-btn'+(on?' on':'');document.body.classList.toggle('screen',on);
   if(on){
     sw.style.overflow='auto';document.getElementById('ph').style.display='none';
     document.getElementById('pz').style.display='';document.getElementById('ph').innerHTML='';_fts=[];
     if(wsV&&wsV.readyState===WebSocket.OPEN){
-      if(typeof RTCPeerConnection!=='undefined'&&typeof VideoDecoder==='undefined'){
-        wsV.send(JSON.stringify({type:'set_mode',screen:true,format:'webrtc'}));
-        var td=document.createElement('div');
-        td.style.cssText='position:fixed;left:50%;top:12px;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#ffd166;border:1px solid #ffd166;padding:6px 14px;font-size:11px;letter-spacing:.05em;z-index:2000;border-radius:3px;font-family:inherit;pointer-events:none;white-space:nowrap';
-        td.textContent='当前浏览器无 VideoDecoder,使用 WebRTC 兜底(30fps+高延迟)。建议 Chrome/Edge';
-        document.body.appendChild(td);
-        setTimeout(function(){try{td.remove()}catch(_){}},5000);
-      }
-      else
-        wsV.send(JSON.stringify({type:'set_mode',screen:true}));
+      _startScreenVideo();
     }
   }else{
     _fts=[];st.textContent='LIVE';_rqStop();
@@ -141,14 +200,32 @@ function sm(on){
   }
 }
 mb.addEventListener('click',function(){sm(!_so);});
+var _ENC_LABELS={h264_nvenc:'NVENC (NVIDIA)',h264_amf:'AMF (AMD)',h264_qsv:'QSV (Intel)',libx264:'x264 软编 (CPU)'};
 function _openPanel(){
   var d=document.createElement('div');
   d.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:1001';
   var b=document.createElement('div');
-  b.style.cssText='background:var(--surface);border:1px solid var(--border);padding:16px;display:flex;flex-direction:column;gap:8px;min-width:220px';
+  b.style.cssText='background:var(--surface);border:1px solid var(--border);padding:16px;display:flex;flex-direction:column;gap:8px;min-width:240px';
   var t=document.createElement('div');t.textContent='DeskBeam';
   t.style.cssText='color:var(--dim);font-size:10px;letter-spacing:.1em;text-transform:uppercase;text-align:center;margin-bottom:4px';
   b.appendChild(t);
+  /* 串流状态：编码为服务端实际选中的编码器（NVENC/AMF/QSV/软编），
+     分辨率为编码输出尺寸；与原生捕获不一致即为降级（WAN/软编降规格）。 */
+  var encLbl=_ENC_LABELS[_encName]||(_encName?_encName:'未连接');
+  var encHw=_encName&&_encName!=='libx264';
+  var st=document.createElement('div');
+  st.style.cssText='border:1px solid var(--border);border-radius:2px;padding:6px 8px;display:flex;flex-direction:column;gap:3px;font-size:11px;letter-spacing:.02em;color:var(--text)';
+  var en=document.createElement('div');
+  en.innerHTML='<span style="color:var(--dim)">编码 </span><span style="color:'+(encHw?'var(--green)':'var(--accent)')+';font-weight:700">'+(encHw?'硬':'软')+' · '+encLbl+'</span>';
+  st.appendChild(en);
+  var deg=(_rwr&&_rwr!==_rw)||(_rhr&&_rhr!==_rh);
+  var rn=document.createElement('div');
+  if(!_rw)rn.innerHTML='<span style="color:var(--dim)">分辨率 </span><span style="color:var(--dim)">未连接</span>';
+  else rn.innerHTML='<span style="color:var(--dim)">分辨率 </span><span style="color:'+(deg?'var(--accent)':'var(--text)')+';font-weight:700">'+
+    (deg?(_rwr+'×'+_rhr+' → '):'')+_rw+'×'+_rh+' @ '+Math.round(_vfps)+'fps'+
+    (deg?' <span style="color:var(--accent)">降级</span>':'')+'</span>';
+  st.appendChild(rn);
+  b.appendChild(st);
   var row=document.createElement('div');row.style.cssText='display:flex;gap:8px';
   b.appendChild(row);
   var l=document.createElement('button');l.textContent='Logout';
@@ -198,6 +275,29 @@ document.getElementById('pl').addEventListener('click',function(){sw.scrollLeft=
 document.getElementById('pr').addEventListener('click',function(){sw.scrollLeft=Math.min(sw.scrollWidth-sw.clientWidth,sw.scrollLeft+P);});
 document.getElementById('pu').addEventListener('click',function(){sw.scrollTop=Math.max(0,sw.scrollTop-P);});
 document.getElementById('pd').addEventListener('click',function(){sw.scrollTop=Math.min(sw.scrollHeight-sw.clientHeight,sw.scrollTop+P);});
+/* ── 后台标签页治理:隐藏时不自动重连(避免僵尸标签页循环重连拖垮
+   服务端),并暂停视频流省 GPU/带宽;回到前台恢复。 ── */
+var _recon={cmd:false,vid:false};
+function _reconLater(which,fn){
+  _recon[which]=true;
+  if(document.hidden)return;
+  setTimeout(function(){
+    if(document.hidden)return;  // 挂起等 visibilitychange 再恢复
+    _recon[which]=false;fn();
+  },2000);
+}
+document.addEventListener('visibilitychange',function(){
+  if(document.hidden){
+    if(_so){
+      if(wsV&&wsV.readyState===WebSocket.OPEN)
+        wsV.send(JSON.stringify({type:'set_mode',screen:false}));
+    }
+    return;
+  }
+  if(_recon.cmd){_recon.cmd=false;cn();}
+  if(_recon.vid){_recon.vid=false;cnV();}
+  else if(_so)_startScreenVideo();
+});
 function cn(){
   var p=location.protocol==='https:'?'wss':'ws';
   ws=new WebSocket(p+'://'+location.host+_BASE+'/ws_cmd');
@@ -208,57 +308,35 @@ function cn(){
   ws.onclose=function(){
     _qmtx=0;_qmty=0;_qmp=false;st.textContent='RETRY';
     var gx=document.getElementById('gex');if(gx)gx.textContent='RETRY';
-    setTimeout(cn,2000);
+    _reconLater('cmd',cn);
   };
   ws.onerror=function(){st.textContent='ERROR';};
   ws.onmessage=function(e){
     if(typeof e.data!=='string')return;
     try{
       var m=JSON.parse(e.data);
-      if(m.type==='hello'){
-        _iceServers=m.iceServers||[];_isLan=m.lan!==false;
-        if(!m.streaming){document.getElementById('mb').style.display='none';}
-        if(m.espConfig){
-          _espRelay=m.espConfig.relayUrl;_espToken=m.espConfig.token;_espDev=m.espConfig.device;
+        if(m.type==='hello'){
+          _iceServers=m.iceServers||[];_isLan=m.lan!==false;
+          if(!m.streaming){document.getElementById('mb').style.display='none';}
         }
-      }
     }catch(_){}
   };
 }
 function cnV(){
+  _bitrateTier=0;_tierSince=0;
   var p=location.protocol==='https:'?'wss':'ws';
   wsV=new WebSocket(p+'://'+location.host+_BASE+'/ws');
   wsV.binaryType='arraybuffer';
   wsV.onopen=function(){if(_so||_gm)sm(true);};
-  wsV.onclose=function(){setTimeout(cnV,2000);};
+  wsV.onclose=function(){_reconLater('vid',cnV);};
   wsV.onerror=function(){};
   wsV.onmessage=function(e){
     if(typeof e.data==='string'){
       try{
         var m=JSON.parse(e.data);
         if(m.type==='screen_config'){
-          if(typeof VideoDecoder==='undefined')return;
-          _rqStop();_rw=m.width;_rh=m.height;_rwr=m.raw_width||_rw;_rhr=m.raw_height||_rh;_ts=0;_vfps=m.fps||30;_rqPre=1;_latIv=1000/_vfps;
-          if(decoder){try{decoder.close();}catch(ex){}decoder=null;}
-          var vd=document.getElementById('vd');if(vd)vd.style.display='none';
-          var tg=_gm?document.getElementById('gc'):cv;
-          tg.style.display='';tg.width=_rw;tg.height=_rh;
-          decoder=new VideoDecoder({
-            output:function(f){
-              var n=performance.now();_fts.push(n);_fts.length>10&&_fts.shift();
-              var _nw=performance.now();
-              if(_nw-_stLast>500){
-                _stLast=_nw;
-                var fps=_fts.length<3?0:Math.min(120,Math.round((_fts.length-1)*1000/(_fts[_fts.length-1]-_fts[0])));
-                st.textContent='LIVE '+String(fps).padStart(3,'0')+'fps '+String(Math.max(0,Math.round(_lat))).padStart(3,'0')+'ms';
-              }
-              _rq.push(f);
-              if(_rq.length>_rqMax){try{_rq.shift().close();}catch(_){}}
-              _rqStart();
-            },
-            error:function(e){console.error('Decoder:',e);}
-          });
-          decoder.configure({codec:m.codec});_fts=[];
+          _encName=m.enc||'';
+          _setupDecoder(m);
         }else if(m.type==='webrtc_offer'){
           var pc=new RTCPeerConnection({iceServers:_iceServers});_pc=pc;_rtcDc=null;
           pc.ontrack=function(e){
@@ -284,8 +362,17 @@ function cnV(){
       var isKey=v[0]===1,h264=v.subarray(5);
       var seq=0;
       for(var i=0;i<4;i++)seq=seq*256+v[1+i];
-      _latMeasure(seq);
+      var _na=performance.now();
+      if(_latArrPrev){var _d=_na-_latArrPrev;if(_d>5&&_d<250)_latIv=_latIv*0.92+_d*0.08;}
+      _latArrPrev=_na;
+      _lastFrameAt=_na;
+      _latMeasure(seq);_bitrateAdapt();
       if(decoder&&decoder.state==='configured'){
+        /* 仅解码器真饱和(decodeQueueSize 深积压)时跳 delta 等 key。
+           渲染队列 _rq 存的是已解码帧,丢了不破坏参考链——由解码回调里
+           原有的"丢最旧"处理,这里绝不能按 _rq 跳帧,否则渲染稍慢就
+           循环进入 GOP 级冻结。 */
+        if(!isKey&&decoder.decodeQueueSize>16)return;
         var c=new EncodedVideoChunk({type:isKey?'key':'delta',timestamp:_ts,data:h264});_ts+=Math.round(1000000/_vfps);
         try{decoder.decode(c);}catch(_){}
       }
@@ -294,19 +381,19 @@ function cnV(){
 }
 
 /* 端到端延迟:服务端每帧带一个单调帧序号。客户端只用本地时钟
-   performance.now()——不比较两端时钟(跨机器时钟速率不同,直接相减
-   会产生单向漂移)。帧 N 期望到达 = 首帧到达时刻 + N * 帧间隔,帧间隔
-   直接用服务端上报的 fps(1000/fps)计算,不靠客户端测量到达间隔
-   (浏览器事件积压会让实测间隔失真)。实际到达晚于期望多少,就是累积
-   延迟。持续超限就重连视频流释放;控制通道保留。 */
+   performance.now()——不比较两端时钟。期望帧间隔用实测到达间隔的
+   EMA 自适应(不用配置 fps),这样实际帧率低于配置时不会积累出
+   虚假延迟;真正的停顿(丢包/卡顿/渲染积压)仍会让延迟冲高触发重连。 */
 var _latS0=-1,_latA0=0,_latLast=-1;
 var _latIv=1000/30;
+var _latArrPrev=0;
 var _lat=0,_latOver=null,_latLastRefresh=0;
 var _LAT_LIMIT=1500;      // 触发阈值 ms
 var _LAT_COOLDOWN=60000;  // 一次刷新后的冷却 ms
+var _latReconCnt=0;       // 连续快速触发计数(风暴抑制)
 function _latReset(){
   _latS0=-1;_latA0=0;_latLast=-1;
-  _lat=0;_latOver=null;
+  _lat=0;_latOver=null;_lastFrameAt=performance.now();
 }
 function _latMeasure(seq){
   var now=performance.now();
@@ -317,10 +404,67 @@ function _latMeasure(seq){
   if(_lat>_LAT_LIMIT){
     if(_latOver===null)_latOver=now;
     else if(now-_latOver>500&&now-_latLastRefresh>_LAT_COOLDOWN){
-      _latOver=null;_latLastRefresh=now;_latReset();
+      /* 风暴抑制:接收端/CPU 瞬时停顿会让延迟冲高,重连治不了它,反而
+         每次冷却到期就再断一次(用户看到"卡到自动刷新")。连续触发时
+         指数退避:第 2 次 3 分钟冷却,第 3 次 10 分钟,>=4 次不再自动
+         重连(画面最多延迟累积,不再打断)。正常网络不足 1.5s 时计数
+         每 10 分钟自然衰减归零。 */
+      _latReconCnt++;
+      if(_latReconCnt>=4){
+        _latOver=null;
+        return;
+      }
+      var cd=_latReconCnt===1?_LAT_COOLDOWN:(_latReconCnt===2?180000:600000);
+      _latLastRefresh=now+_LAT_COOLDOWN-cd; /* 借用冷却比较,等效延长 */
+      _latCooldownUntil=now+cd;
+      _latOver=null;_latReset();
       if(wsV)wsV.close();
     }
-  }else _latOver=null;
+  }else{
+    _latOver=null;
+    if(_lat<200&&now-(_latCooldownUntil||0)>600000)_latReconCnt=0;
+  }
+}
+var _latCooldownUntil=0;
+/* 帧停滞看门狗:捕获源(如 UAC 安全桌面、锁屏)短暂失效时帧会完全停止,
+   延迟测量因无新帧到达而永远无法触发重连。这里每秒检查:屏幕模式下视频
+   连接正常但已 5 秒无帧,就重连一次(每 10 秒最多一次,无永久抑制——
+   捕获源失效是瞬时故障,重连才能恢复)。 */
+var _lastFrameAt=0,_stallCooldownUntil=0;
+function _frameStall(){
+  if(!_so||!(wsV&&wsV.readyState===WebSocket.OPEN)||!_lastFrameAt)return;
+  var now=performance.now();
+  if(now-_lastFrameAt>5000&&now>_stallCooldownUntil){
+    _stallCooldownUntil=now+10000;
+    _lastFrameAt=now;  /* re-arm: 重连后若仍无帧,10s 后再试,直到恢复 */
+    if(wsV)wsV.close();
+  }
+}
+setInterval(_frameStall,1000);
+/* ── Dynamic bitrate: tell the server to lower maxrate when sustained
+   latency indicates network congestion.  Three tiers: 0 = full speed,
+   1 = moderate congestion, 2 = severe.  Escalation requires latency to
+   stay over threshold for 5s (real congestion, not a one-off stall);
+   recovery is slow (20s per tier) to avoid flapping. ── */
+var _bitrateTier=0,_tierSince=0,_tierHighAt=0;
+function _bitrateAdapt(){
+  var now=performance.now();
+  if(_lat>500){
+    if(!_tierHighAt)_tierHighAt=now;
+    if(_bitrateTier<2&&_lat>1000&&now-_tierHighAt>5000){
+      _bitrateTier=Math.min(2,_bitrateTier+1);_tierHighAt=0;_tierSince=now;
+      if(wsV&&wsV.readyState===WebSocket.OPEN)wsV.send(JSON.stringify({type:'bitrate_adapt',tier:_bitrateTier}));
+    }else if(_bitrateTier<1&&now-_tierHighAt>5000){
+      _bitrateTier=1;_tierHighAt=0;_tierSince=now;
+      if(wsV&&wsV.readyState===WebSocket.OPEN)wsV.send(JSON.stringify({type:'bitrate_adapt',tier:_bitrateTier}));
+    }
+  }else{
+    _tierHighAt=0;
+    if(_lat<200&&_bitrateTier>0&&now-_tierSince>20000){
+      _bitrateTier--;_tierSince=now;
+      if(wsV&&wsV.readyState===WebSocket.OPEN)wsV.send(JSON.stringify({type:'bitrate_adapt',tier:_bitrateTier}));
+    }
+  }
 }
 
 var _tt=null,_lt=0;
@@ -509,37 +653,6 @@ window.addEventListener('devicemotion',function(e){
     else _mqAcc(dx,dy);
   }
 });
-var _espRelay='',_espToken='',_espDev='';
-function _espHid(k){
-  if(!_espRelay)return;
-  var r=new WebSocket(_espRelay);
-  r.onopen=function(){
-    r.send(JSON.stringify({type:'register',token:_espToken}));
-    r.send(JSON.stringify({type:'hid_key',device:_espDev,key:k}));
-    setTimeout(function(){try{r.close()}catch(_){}},500);
-  };
-}
-function _espUac(){_espHid('left');setTimeout(function(){_espHid('enter')},200);}
-function _espJs(){var s=['backspace','0','5','1','0','2','2'];function n(i){if(i>=s.length)return;_espHid(s[i]);setTimeout(function(){n(i+1)},i===0?10000:200);}n(0);}
-function _espEsc(){_espHid('esc');}
-function _espLock(){_espHid('win+l');}
-function _espWin(){_espHid('win');}
-function _espMouse(o){
-  if(!_espRelay)return;
-  var r=new WebSocket(_espRelay);
-  r.onopen=function(){
-    var m={type:'hid_mouse',device:_espDev};
-    if(o.btn)m.btn=o.btn;
-    if(o.x)m.x=o.x;
-    if(o.y)m.y=o.y;
-    if(o.w)m.w=o.w;
-    if(o.hold)m.hold=o.hold;
-    r.send(JSON.stringify({type:'register',token:_espToken}));
-    r.send(JSON.stringify(m));
-    setTimeout(function(){try{r.close()}catch(_){}},500);
-  };
-}
-function _espL(){_espMouse({btn:1});}
 document.addEventListener('touchmove',function(e){if(!e.target.closest('#ks')&&!e.target.closest('input'))e.preventDefault();},{passive:false});
 function _bindHoldEl(el,dcmd,ucmd,nocancel,norepeat){
   if(!el)return;
@@ -586,44 +699,6 @@ function _bindHoldEl(el,dcmd,ucmd,nocancel,norepeat){
   el.addEventListener('touchcancel',up);
 }
 function _bindHoldCombo(el,keys){if(!el)return;_bindHoldEl(el,keys.map(function(k){return {type:'key_down',key:k};}),keys.map(function(k){return {type:'key_up',key:k};}),true,true);}
-function _bindRepEl(el,cmd){if(!el)return;
-  var iv=null,to=null,pr=false,sx=0,sy=0,sl=false,sTid=-1;
-  var add=function(){el.classList.add('pressed');};
-  var rem=function(){el.classList.remove('pressed');};
-  var _tid=function(ts){var t;for(var i=0;i<ts.length;i++)if(ts[i].identifier===sTid){t=ts[i];break;}return t||ts[0];};
-  var f=function(e){
-    if(e.type==='touchstart'){
-      var t=e.changedTouches[0];sx=t.clientX;sy=t.clientY;sTid=t.identifier;sl=false;
-      if(pr)return;pr=true;add();sendCmd({type:cmd});
-      to=setTimeout(function(){to=null;iv=setInterval(function(){sendCmd({type:cmd});},80);},350);
-    }else{
-      e.preventDefault();
-      if(pr)return;pr=true;add();sendCmd({type:cmd});
-      to=setTimeout(function(){to=null;iv=setInterval(function(){sendCmd({type:cmd});},80);},350);
-    }
-  };
-  var mv=function(e){
-    if(sl)return;
-    var t=_tid(e.touches);
-    if(t.identifier!==sTid)return;
-    if(Math.abs(t.clientX-sx)>10||Math.abs(t.clientY-sy)>10){
-      sl=true;
-      if(pr){pr=false;rem();if(to){clearTimeout(to);to=null;}if(iv){clearInterval(iv);iv=null;}}
-    }
-  };
-  var g=function(e){
-    if(e.type==='touchend'&&sl)return;
-    e.preventDefault();sTid=-1;rem();
-    if(!pr)return;pr=false;
-    if(to){clearTimeout(to);to=null;}
-    if(iv){clearInterval(iv);iv=null;}
-  };
-  if(!_isTouch){el.addEventListener('mousedown',f);el.addEventListener('mouseup',g);el.addEventListener('mouseleave',g);}
-  el.addEventListener('touchstart',f,{passive:true});
-  el.addEventListener('touchmove',mv,{passive:true});
-  el.addEventListener('touchend',g,{passive:false});
-  el.addEventListener('touchcancel',g);
-}
 function _tapEl(el,fn,nocancel){if(!el)return;
   var sx=0,sy=0,sl=false,sTid=-1;
   var add=function(){el.classList.add('pressed');};
@@ -769,27 +844,7 @@ function _gTap(b,key){_tapEl(b,function(){sendCmd({type:'key_press',key:key});},
   var sp=_gkey('SPACE','hl');_gTap(sp,'space');reg(sp,'R');
   var l=_gkey('CTRL','hl');_bindHoldEl(l,{type:'key_down',key:'ctrl'},{type:'key_up',key:'ctrl'},true,true);reg(l,'R');
   var sh=_gkey('SHIFT');reg(sh,'R');
-  (function(){
-    var shT=null;
-    _gShSt=false;
-    _gShRel=function(){
-      if(_gShSt||shT){_gShSt=false;if(shT){clearTimeout(shT);shT=null;}sh.classList.remove('sh-on');sendCmd({type:'key_up',key:'shift'});}
-    };
-    var d=function(){
-      if(_gShSt){_gShRel();return;}
-      sendCmd({type:'key_down',key:'shift'});
-      shT=setTimeout(function(){shT=null;_gShSt=true;sh.classList.add('sh-on');},500);
-    };
-    var u=function(){
-      if(shT){clearTimeout(shT);shT=null;sendCmd({type:'key_up',key:'shift'});return;}
-      if(_gShSt)sh.classList.add('sh-on');
-    };
-    sh.addEventListener('touchstart',function(e){e.preventDefault();d();});
-    sh.addEventListener('touchend',function(e){e.preventDefault();u();});
-    sh.addEventListener('mousedown',d);
-    sh.addEventListener('mouseup',u);
-    sh.addEventListener('mouseleave',u);
-  })();
+  _gShRel=_mkShiftBtn(sh);
   [['C','c',''],['X','x','']].forEach(function(k){var b=_gkey(k[0],k[2]);_gTap(b,k[1]);reg(b,'R');});
   var tapB=_gkey('TAP');_bindHoldEl(tapB,{type:'key_down',key:'tab'},{type:'key_up',key:'tab'},true,true);reg(tapB,'R');
   [['V','v',''],['\u232b','backspace',''],['ENTER','enter','enter-key']].forEach(function(k){var b=_gkey(k[0],k[2]);_gTap(b,k[1]);reg(b,'R');});

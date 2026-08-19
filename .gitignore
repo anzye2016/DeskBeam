@@ -20,12 +20,7 @@ audit.log
 frp/frpc.exe
 ffmpeg/
 
-# 内部/含个人信息，不公开
-SESSION_HANDOFF.md
-GYRO_TOUCH_DEV_NOTES.md
-frp/
-frp-hd.ps1
-tunnel-hd.ps1
-tunnel-daemon-hd.ps1
-deskbeam-daemon.ps1
+# 内部文档/个人部署信息，不公开
+*.md
+!README.md
 快捷命令.txt

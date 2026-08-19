@@ -4,6 +4,7 @@
     "ssl_key": "key.pem",
     "web_dir": "web",
     "token": "",
+    "totp_secret": "",
     "max_fps": 10,
     "max_fps_lan": 15,
     "gop": 10,
@@ -29,8 +30,5 @@
     "asr_api_key": "",
     "asr_api_model": "mimo-v2.5-asr",
     "asr_api_auth": "",
-    "asr_api_response_path": "choices.0.message.content",
-    "esp_relay_url": "",
-    "esp_token": "",
-    "esp_device": ""
+    "asr_api_response_path": "choices.0.message.content"
 }

@@ -25,9 +25,10 @@ except ImportError:
     av = None
 
 try:
-    from encoder import H264Encoder
+    from encoder import H264Encoder, probe_encoder_name as _probe_encoder_name
 except ImportError:
     H264Encoder = None
+    _probe_encoder_name = None
 
 HAS_DXCAM = dxcam is not None
 HAS_AV = av is not None and np is not None and H264Encoder is not None
@@ -39,7 +40,14 @@ _last_frame = None
 
 
 def probe_hw_encoder():
-    """Return the hardware encoder FFmpeg will use, or 'libx264' for software."""
+    """Return the hardware encoder the PyAV pipeline will use, or 'libx264'.
+
+    Delegates to encoder.probe_encoder_name (real tiny-encode verification)
+    so registry-only ghosts (GPUs without a working NVENC/QSV/AMF) don't
+    fool the probe. Falls back to a create()-only check only when the
+    encoder module is unavailable."""
+    if _probe_encoder_name is not None:
+        return _probe_encoder_name()
     if av is None:
         return "libx264"
     for name in ("h264_nvenc", "h264_qsv", "h264_amf"):

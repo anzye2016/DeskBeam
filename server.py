@@ -510,7 +510,6 @@ _MOVE_LOCK = threading.Lock()
 
 _GPU_READY = _HAS_FFMPEG and GPUStreamer is not None
 _STREAMING = _cfg.get("streaming", True) and (_GPU_READY or (capture is not None and capture.HAS_DXCAM and capture.HAS_AV))
-_GPU_OK = [None]
 _GPU_START_RETRIES = 2
 _GPU_START_RETRY_DELAY = 1.5
 
@@ -1144,10 +1143,15 @@ async def _gpu_sender(sess):
 
 
 async def _fallback_to_legacy(sess, reason):
+    # GPU capture lost (UAC / lock screen / session switch).  The old dxcam
+    # legacy pipeline is native-crash-prone here (BEX64 / 0xc0000409 on some
+    # GPU configs — Q470) and cannot capture the secure desktop anyway, so we
+    # do NOT switch to it.  Instead this connection simply stops streaming:
+    # the client's frame-stall watchdog reconnects and retries the GPU path
+    # until capture becomes available again.
     _gpu_dbg(f"fallback to legacy ({reason})")
-    print(f"  GPU streamer {reason} — falling back to legacy pipeline")
-    _GPU_OK[0] = False
-    await _legacy_sender(sess)
+    print(f"  GPU streamer {reason} — pausing stream; client will reconnect")
+    await asyncio.sleep(1)
 
 
 async def ws_handler(websocket):
@@ -1168,17 +1172,18 @@ async def ws_handler(websocket):
     _webrtc_timeout_task = None
 
     # _ffmpeg_ready() re-checks the file so a just-downloaded ffmpeg is
-    # picked up; _GPU_OK is reset per connection so one early GPU failure
-    # does not permanently pin this process to the legacy pipeline.
+    # picked up. Every connection re-evaluates the GPU path: when ffmpeg is
+    # present we always try it (a transient UAC/lock loss falls back to
+    # pausing, never to the crash-prone dxcam pipeline); when ffmpeg is
+    # absent the pure-soft legacy pipeline runs from the start.
     async def screen_sender():
-        if _ffmpeg_ready() and GPUStreamer is not None and _GPU_OK[0] is not False:
+        if _ffmpeg_ready() and GPUStreamer is not None:
             _gpu_dbg("sender: GPU path selected")
             await _gpu_sender(sess)
         else:
             _gpu_dbg("sender: legacy path selected")
             await _legacy_sender(sess)
 
-    _GPU_OK[0] = None  # re-evaluate GPU path for this connection
     sender_task = asyncio.create_task(screen_sender())
 
     try:

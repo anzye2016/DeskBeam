@@ -56,7 +56,7 @@ start.bat
 
 ## 浏览器要求
 
-串流画面需要 Chrome / Edge 94+（WebCodecs）。Firefox / Safari 不支持串流画面，但遥控功能不受影响。
+串流画面需要 Chrome / Edge 94+（WebCodecs）。Safari（iPhone/iPad）待测试，Firefox 不支持串流画面，但遥控功能不受影响。
 
 ## 配置
 

@@ -27,8 +27,6 @@ pyinstaller --onefile --noconsole --uac-admin ^
     --hidden-import gpu_stream ^
     --hidden-import dxcam ^
     --collect-all av ^
-    --hidden-import aiortc.rtcrtpsender ^
-    --hidden-import aiortc.rtpreceiver ^
     server.py
 
 if errorlevel 1 ( echo ERROR: build failed & exit /b 1 )
